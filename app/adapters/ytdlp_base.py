@@ -1,0 +1,210 @@
+"""Shared yt-dlp adapter logic for YouTube and Bilibili."""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
+from yt_dlp import YoutubeDL
+
+from app.adapters.base import Adapter, ContentMeta, NativeTranscript
+from app.adapters.subtitles import parse_json3, parse_vtt
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+# Where mounted cookie files are looked up when YT_DLP_COOKIES_FILE is unset.
+COOKIES_DIR = Path("/cookies")
+
+
+def _resolve_cookies_file() -> str | None:
+    """Use the configured cookies file, else auto-detect a *.txt in /cookies."""
+    configured = get_settings().yt_dlp_cookies_file
+    if configured and Path(configured).exists():
+        return configured
+    if COOKIES_DIR.is_dir():
+        txts = sorted(COOKIES_DIR.glob("*.txt"))
+        if txts:
+            return str(txts[0])
+    return None
+
+
+class YtDlpAdapter(Adapter):
+    name = "yt_dlp"
+    # Extra HTTP headers (e.g. Referer) some sites require to avoid bot blocks.
+    extra_headers: dict[str, str] = {}
+
+    def _ydl_opts(self, extra: dict | None = None) -> dict:
+        opts: dict = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "noprogress": True,
+            # Resilience against flaky CDNs (esp. Bilibili): retry hard and read
+            # in bounded chunks so a stalled socket doesn't fail the whole file.
+            "socket_timeout": 60,
+            "retries": 10,
+            "fragment_retries": 10,
+            "file_access_retries": 5,
+            "extractor_retries": 3,
+            "http_headers": {"User-Agent": BROWSER_UA, **self.extra_headers},
+        }
+        cookies = _resolve_cookies_file()
+        if cookies:
+            opts["cookiefile"] = cookies
+        if extra:
+            opts.update(extra)
+        return opts
+
+    def _extract_info(self, url: str, download: bool = False, extra: dict | None = None) -> dict:
+        with YoutubeDL(self._ydl_opts(extra)) as ydl:
+            return ydl.extract_info(url, download=download)
+
+    def fetch_metadata(self, url: str) -> ContentMeta:
+        info = self._extract_info(url)
+        published = None
+        ts = info.get("timestamp")
+        if ts:
+            published = datetime.fromtimestamp(ts, tz=UTC)
+        elif info.get("upload_date"):
+            published = datetime.strptime(info["upload_date"], "%Y%m%d").replace(
+                tzinfo=UTC
+            )
+        return ContentMeta(
+            title=info.get("title"),
+            author=info.get("uploader") or info.get("channel"),
+            description=info.get("description"),
+            duration_s=int(info["duration"]) if info.get("duration") else None,
+            published_at=published,
+            thumbnail=info.get("thumbnail"),
+            external_id=info.get("id"),
+            view_count=info.get("view_count"),
+            like_count=info.get("like_count"),
+            dislike_count=info.get("dislike_count"),
+        )
+
+    def get_native_transcript(
+        self, url: str, language: str | None = None
+    ) -> NativeTranscript | None:
+        info = self._extract_info(url)
+        manual = info.get("subtitles") or {}
+        # Drop machine-translated auto-captions (they carry tlang= in the URL):
+        # we want the video's actual spoken language, not a translation.
+        auto = self._drop_translations(info.get("automatic_captions") or {})
+
+        # Selection priority: explicitly requested language, then the video's
+        # own main language, then the configured preferred language (zh), then
+        # English, then whatever is left.
+        original = (info.get("language") or "").split("-")[0] or None
+        prefs = [language, original, get_settings().preferred_language, "en"]
+
+        lang, tracks = self._pick_language(manual, prefs)
+        if tracks is None:
+            lang, tracks = self._pick_language(auto, prefs)
+        if tracks is None:
+            return None
+
+        segments = self._download_and_parse(tracks)
+        if not segments:
+            return None
+        if self._is_mislabeled(lang, segments):
+            # A track that claims to be Chinese but is actually a non-CJK
+            # translation: better to transcribe the real spoken audio.
+            logger.info(
+                "native subtitle '%s' for %s is not in the expected language; "
+                "falling back to audio transcription",
+                lang,
+                url,
+            )
+            return None
+        return NativeTranscript(language=lang, segments=segments)
+
+    def _pick_language(
+        self, table: dict, prefs: list[str | None]
+    ) -> tuple[str | None, list | None]:
+        if not table:
+            return None, None
+        keys = list(table.keys())
+        ordered: list[str] = []
+        for pref in prefs:
+            if pref:
+                ordered += [k for k in keys if k.startswith(pref)]
+        ordered += keys
+        for key in dict.fromkeys(ordered):  # de-dupe, keep order
+            if table.get(key):
+                return key, table[key]
+        return None, None
+
+    def _drop_translations(self, table: dict) -> dict:
+        """Keep only original (non-machine-translated) caption tracks."""
+        out: dict = {}
+        for key, tracks in table.items():
+            originals = [t for t in tracks if "tlang=" not in (t.get("url") or "")]
+            if originals:
+                out[key] = originals
+        return out
+
+    def _is_mislabeled(self, lang: str | None, segments: list[dict]) -> bool:
+        """True if a Chinese-tagged track is actually non-Chinese text."""
+        preferred = get_settings().preferred_language
+        if not lang or not preferred or not lang.startswith(preferred):
+            return False
+        if not preferred.startswith("zh"):
+            return False
+        sample = " ".join((s.get("text") or "") for s in segments[:60])
+        cjk = sum(1 for ch in sample if "\u4e00" <= ch <= "\u9fff")
+        latin = sum(1 for ch in sample if ch.isascii() and ch.isalpha())
+        return cjk < latin * 0.2
+
+    def _download_and_parse(self, tracks: list) -> list[dict]:
+        # Prefer json3 (clean) then vtt.
+        order = {"json3": 0, "vtt": 1, "srv3": 2, "srv1": 3}
+        tracks_sorted = sorted(tracks, key=lambda t: order.get(t.get("ext", ""), 9))
+        for track in tracks_sorted:
+            ext = track.get("ext")
+            track_url = track.get("url")
+            if not track_url or ext not in ("json3", "vtt"):
+                continue
+            try:
+                resp = httpx.get(track_url, timeout=30, follow_redirects=True)
+                resp.raise_for_status()
+                if ext == "json3":
+                    segs = parse_json3(resp.text)
+                else:
+                    segs = parse_vtt(resp.text)
+                if segs:
+                    return segs
+            except Exception:  # noqa: BLE001
+                logger.warning("failed to fetch subtitle track ext=%s", ext, exc_info=True)
+        return []
+
+    def download_audio(self, url: str, dest_dir: Path) -> Path:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        outtmpl = str(dest_dir / "%(id)s.%(ext)s")
+        opts = self._ydl_opts({
+            "skip_download": False,
+            "format": "bestaudio/best",
+            "outtmpl": outtmpl,
+            # 10MB HTTP chunks make large DASH audio reads robust against the
+            # "Downloaded X, expected Y bytes" / read-timeout failures.
+            "http_chunk_size": 10 * 1024 * 1024,
+            "concurrent_fragment_downloads": 1,
+            "continuedl": True,
+        })
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            path = Path(ydl.prepare_filename(info))
+        if not path.exists():
+            # postprocessing may have changed extension; find by id
+            matches = list(dest_dir.glob(f"{info.get('id')}.*"))
+            if matches:
+                return matches[0]
+            raise FileNotFoundError(f"downloaded audio not found for {url}")
+        return path

@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+
+  web:
+    build: .
+    image: stream-reduce:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      RUN_SCHEDULER: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - app-data:/data
+      # Writable so yt-dlp can refresh the cookie jar on exit.
+      - ./cookies:/cookies
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    image: stream-reduce:latest
+    restart: unless-stopped
+    command: ["python", "-m", "worker.run"]
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /data
+      RUN_SCHEDULER: "0"
+    volumes:
+      - app-data:/data
+      # Writable so yt-dlp can refresh the cookie jar on exit.
+      - ./cookies:/cookies
+    depends_on:
+      - redis
+
+  # Optional: self-hosted RSSHub to widen subscription coverage.
+  # Subscribe to e.g. http://rsshub:1200/youtube/channel/<id>
+  rsshub:
+    image: diygod/rsshub:chromium-bundled
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: memory
+    ports:
+      - "1200:1200"
+    profiles: ["rsshub"]
+
+volumes:
+  app-data:
+  redis-data:

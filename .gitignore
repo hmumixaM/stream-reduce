@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+.DS_Store
+
+# Login cookies (yt-dlp) contain sensitive session tokens
+cookies/
