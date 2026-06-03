@@ -57,7 +57,8 @@ docker compose build
 docker compose up -d
 ```
 
-Open http://localhost:8000.
+Open http://localhost:8010 (the published host port; set `WEB_PORT` in `.env`
+to change it — the container always serves on 8000).
 
 Services: `web` (API + UI + scheduler), `worker` (pipeline jobs), `redis`.
 To also run a local RSSHub instance:

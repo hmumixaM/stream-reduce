@@ -16,7 +16,9 @@ services:
       DATA_DIR: /data
       RUN_SCHEDULER: "1"
     ports:
-      - "8000:8000"
+      # Host port is configurable; container still serves on 8000.
+      # Override by setting WEB_PORT in your environment or .env file.
+      - "${WEB_PORT:-8010}:8000"
     volumes:
       - app-data:/data
       # Writable so yt-dlp can refresh the cookie jar on exit.
