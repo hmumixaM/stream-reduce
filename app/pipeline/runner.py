@@ -24,6 +24,54 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _relative_media_path(audio_path: str, settings) -> str:
+    """Path of a downloaded file relative to the media dir (for /media serving)."""
+    from pathlib import Path as _Path
+
+    p = _Path(audio_path)
+    try:
+        return str(p.relative_to(settings.resolved_media_dir))
+    except ValueError:
+        return p.name
+
+
+def _download_decodable(adapter, url: str, dest_dir, expected, attempts: int = 3):
+    """Download audio and verify it actually DECODES to ~the full length.
+
+    Bilibili (especially under batch load) intermittently returns a file that is
+    byte-complete but corrupt mid-stream; its container header still claims the
+    full duration, so a header-based size/duration check passes while only the
+    first minutes are decodable. We decode-verify each download and re-fetch a
+    clean copy a few times — a fresh download almost always succeeds. The file is
+    deleted between attempts so yt-dlp's resume (continuedl) can't keep a bad copy.
+
+    Returns (Path, decodable_seconds). Raises TruncatedAudioError if every
+    attempt is still short.
+    """
+    from pathlib import Path as _Path
+
+    from app.pipeline.audio import decodable_duration
+    from app.pipeline.transcribe import TruncatedAudioError
+
+    decodable = 0.0
+    for attempt in range(1, attempts + 1):
+        path = _Path(adapter.download_audio(url, dest_dir))
+        decodable = decodable_duration(path)
+        if not expected or decodable >= expected * 0.9:
+            return path, decodable
+        logger.warning(
+            "download attempt %d/%d for %s decoded only %.0fs of %ss (%.0f%%); "
+            "re-downloading a clean copy",
+            attempt, attempts, url, decodable, expected,
+            decodable / expected * 100 if expected else 0,
+        )
+        path.unlink(missing_ok=True)
+    raise TruncatedAudioError(
+        f"incomplete audio after {attempts} downloads: only {decodable:.0f}s of "
+        f"expected {expected}s decodable — Bilibili kept returning a corrupt stream"
+    )
+
+
 def process_item(item_id: int) -> None:
     """Run the full ingest -> transcribe -> summarize pipeline for one item."""
     from app.adapters.registry import get_adapter
@@ -91,27 +139,19 @@ def process_item(item_id: int) -> None:
                     native_lang = native.language
                     tracker.set_chunks(0)
                 else:
-                    audio_path = str(
-                        adapter.download_audio(source_url, settings.resolved_media_dir)
-                    )
-                    # Record media metrics and guard against silently-truncated
-                    # downloads: if the audio is much shorter than the known
-                    # duration, fail loudly so it can be retried rather than
-                    # transcribing only the first minutes.
-                    from pathlib import Path as _Path
-
-                    from app.pipeline.audio import probe_duration
-
+                    # Download and decode-verify in one step: the container
+                    # header can claim the full duration even when the stream is
+                    # truncated/corrupt, so we decode the file and re-fetch a
+                    # clean copy a few times before giving up (see helper).
                     expected = meta.duration_s or item.duration_s
-                    actual = probe_duration(audio_path)
-                    item.media_bytes = _Path(audio_path).stat().st_size
-                    item.audio_duration_s = actual or None
+                    path, decodable = _download_decodable(
+                        adapter, source_url, settings.resolved_media_dir, expected
+                    )
+                    audio_path = str(path)
+                    item.media_bytes = path.stat().st_size
+                    item.audio_duration_s = decodable or None
+                    item.media_path = _relative_media_path(audio_path, settings)
                     s.add(item)
-                    if expected and actual and actual < expected * 0.9:
-                        raise RuntimeError(
-                            f"incomplete audio: got {actual:.0f}s of "
-                            f"expected {expected}s; will retry"
-                        )
 
         # Optional last-resort path: hand the audio straight to Gemini when no
         # transcript is available and transcription is not configured.
@@ -149,13 +189,16 @@ def process_item(item_id: int) -> None:
             with session_scope() as s:
                 item = s.get(Item, item_id)
                 item.status = ItemStatus.transcribing
+                expected_duration = item.duration_s or item.audio_duration_s
                 s.add(item)
             with session_scope() as s:
                 with StageTracker(
                     s, item_id, StageName.transcribe,
                     provider="openrouter", model=effective_stt_model(),
                 ) as tracker:
-                    result = transcribe_audio(audio_path, tracker)
+                    result = transcribe_audio(
+                        audio_path, tracker, expected_duration=expected_duration
+                    )
                 _store_transcript(
                     s, item_id, result.language,
                     TranscriptSource.openrouter_whisper, result.segments,
@@ -183,12 +226,27 @@ def process_item(item_id: int) -> None:
 
     except Exception as exc:  # noqa: BLE001 - record failure, let RQ see it
         logger.exception("process_item %s failed", item_id)
+        from app.pipeline.transcribe import TruncatedAudioError
+
+        # A truncated/corrupt download keeps the full byte size, so yt-dlp would
+        # treat it as "already downloaded" and skip on retry. Delete it so the
+        # next attempt fetches a clean copy.
+        truncated = isinstance(exc, TruncatedAudioError) and bool(audio_path)
+        if truncated:
+            from pathlib import Path as _Path
+
+            _Path(audio_path).unlink(missing_ok=True)
+            logger.info("removed truncated audio for item %s to force re-download", item_id)
         with session_scope() as s:
             item = s.get(Item, item_id)
             if item is not None:
                 item.status = ItemStatus.error
                 item.error = f"{type(exc).__name__}: {exc}"[:4000]
                 item.retry_count += 1
+                if truncated:
+                    item.media_bytes = 0
+                    item.audio_duration_s = None
+                    item.media_path = None
                 s.add(item)
         raise
 

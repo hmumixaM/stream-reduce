@@ -45,5 +45,9 @@ class Adapter:
         """Optional timeline bullet-comments. Only Bilibili provides these."""
         return None
 
+    def extract_entries(self, url: str) -> dict | None:
+        """Expand a playlist/collection URL into entries. None when unsupported."""
+        return None
+
     def download_audio(self, url: str, dest_dir: Path) -> Path:
         raise NotImplementedError

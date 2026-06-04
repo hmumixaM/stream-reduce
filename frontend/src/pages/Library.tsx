@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock, Coins, Film, Star, Archive, ArchiveRestore, Eye, ThumbsUp, CalendarDays } from "lucide-react";
-import { api } from "@/lib/api";
-import { Card, Input, Select } from "@/components/ui";
-import { PlatformBadge, StatusBadge } from "@/components/badges";
-import { formatCost, formatCount, formatDate, formatMs, timeAgo } from "@/lib/utils";
+import { Folder, FolderPlus } from "lucide-react";
+import { api, type Group } from "@/lib/api";
+import { Button, Card, Input, Select } from "@/components/ui";
+import { PlatformBadge } from "@/components/badges";
+import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
 type View = "all" | "favorites" | "archived";
@@ -38,10 +38,57 @@ export function Library() {
     queryFn: () => api.listItems(params),
     refetchInterval: 8000,
   });
+  const groups = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => api.listGroups(),
+    refetchInterval: 8000,
+  });
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["items"] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["items"] });
+    qc.invalidateQueries({ queryKey: ["groups"] });
+  };
   const favorite = useMutation({ mutationFn: api.toggleFavorite, onSuccess: invalidate });
   const archive = useMutation({ mutationFn: api.toggleArchive, onSuccess: invalidate });
+  const move = useMutation({
+    mutationFn: ({ id, gid }: { id: number; gid: number | null }) =>
+      api.setItemGroup(id, gid),
+    onSuccess: invalidate,
+  });
+  const createAndMove = useMutation({
+    mutationFn: async ({ id, title }: { id: number; title: string }) => {
+      const g = await api.createGroup(title);
+      return api.setItemGroup(id, g.id);
+    },
+    onSuccess: invalidate,
+  });
+  const newFolder = useMutation({
+    mutationFn: (title: string) => api.createGroup(title),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["groups"] }),
+  });
+
+  const actions: ItemCardActions = {
+    onFavorite: favorite.mutate,
+    onArchive: archive.mutate,
+    groups: groups.data ?? [],
+    onMove: (id, gid) => move.mutate({ id, gid }),
+    onCreateFolderAndMove: (id, title) => createAndMove.mutate({ id, title }),
+  };
+
+  const all = items.data ?? [];
+  // Folders are first-class navigation (always visible); the flat item grid
+  // shows ungrouped items. A search/favorites/archived view flattens everything
+  // so items can be found regardless of which folder they live in.
+  const browsing = view === "all" && !q;
+  const visibleItems = browsing
+    ? all.filter((i) => i.group_id == null)
+    : all;
+  const folders = groups.data ?? [];
+
+  const handleNewFolder = () => {
+    const title = window.prompt("New folder name")?.trim();
+    if (title) newFolder.mutate(title);
+  };
 
   return (
     <div>
@@ -49,10 +96,13 @@ export function Library() {
         <div>
           <h1 className="text-2xl font-semibold">Library</h1>
           <p className="text-sm text-muted-foreground">
-            {items.data?.length ?? 0} {view === "archived" ? "archived" : "summaries"}
+            {all.length} {view === "archived" ? "archived" : "summaries"}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleNewFolder}>
+            <FolderPlus className="h-4 w-4" /> New folder
+          </Button>
           <Select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
@@ -100,94 +150,29 @@ export function Library() {
         ))}
       </div>
 
+      {browsing && folders.length > 0 && (
+        <div className="mb-8">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">Folders</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {folders.map((g) => (
+              <FolderTile key={g.id} group={g} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {items.isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
-      ) : items.data && items.data.length > 0 ? (
+      ) : visibleItems.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {items.data.map((item) => (
-            <Link key={item.id} to={`/items/${item.id}`}>
-              <Card className="group relative h-full overflow-hidden transition-colors hover:border-primary">
-                <div className="absolute right-2 top-2 z-10 flex gap-1">
-                  <CardAction
-                    title={item.is_favorite ? "Unfavorite" : "Favorite"}
-                    active={item.is_favorite}
-                    onClick={() => favorite.mutate(item.id)}
-                  >
-                    <Star
-                      className={`h-4 w-4 ${item.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
-                    />
-                  </CardAction>
-                  <CardAction
-                    title={item.is_archived ? "Unarchive" : "Archive"}
-                    onClick={() => archive.mutate(item.id)}
-                  >
-                    {item.is_archived ? (
-                      <ArchiveRestore className="h-4 w-4" />
-                    ) : (
-                      <Archive className="h-4 w-4" />
-                    )}
-                  </CardAction>
-                </div>
-                <div className="aspect-video w-full overflow-hidden bg-muted">
-                  {item.thumbnail ? (
-                    <img
-                      src={item.thumbnail}
-                      alt=""
-                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-muted-foreground">
-                      <Film className="h-8 w-8" />
-                    </div>
-                  )}
-                </div>
-                <div className="p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    <PlatformBadge platform={item.platform} />
-                    <StatusBadge status={item.status} />
-                  </div>
-                  <h3 className="mb-2 line-clamp-2 font-medium leading-snug">
-                    {item.title || item.source_url}
-                  </h3>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    {item.author && <span className="truncate">{item.author}</span>}
-                    <span>added {timeAgo(item.created_at)}</span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                    {item.published_at && (
-                      <span className="flex items-center gap-1">
-                        <CalendarDays className="h-3 w-3" />
-                        {formatDate(item.published_at)}
-                      </span>
-                    )}
-                    {item.view_count != null && (
-                      <span className="flex items-center gap-1" title="Views at crawl time">
-                        <Eye className="h-3 w-3" />
-                        {formatCount(item.view_count)}
-                      </span>
-                    )}
-                    {item.like_count != null && (
-                      <span className="flex items-center gap-1" title="Likes at crawl time">
-                        <ThumbsUp className="h-3 w-3" />
-                        {formatCount(item.like_count)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatMs(item.total_processing_ms)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Coins className="h-3 w-3" />
-                      {formatCost(item.total_cost_usd)}
-                    </span>
-                  </div>
-                </div>
-              </Card>
-            </Link>
+          {visibleItems.map((item) => (
+            <ItemCard key={item.id} item={item} {...actions} />
           ))}
         </div>
+      ) : folders.length > 0 && browsing ? (
+        <Card className="p-10 text-center text-muted-foreground">
+          All items are organized into folders. Open a folder to browse.
+        </Card>
       ) : (
         <Card className="p-10 text-center text-muted-foreground">
           No summaries yet. Click "Add content" to get started.
@@ -197,33 +182,22 @@ export function Library() {
   );
 }
 
-function CardAction({
-  title,
-  active,
-  onClick,
-  children,
-}: {
-  title: string;
-  active?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
+function FolderTile({ group }: { group: Group }) {
   return (
-    <button
-      title={title}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick();
-      }}
-      className={`rounded-md border border-border p-1.5 backdrop-blur transition-colors ${
-        active
-          ? "bg-background/90 text-amber-400"
-          : "bg-background/70 text-muted-foreground hover:bg-background hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
+    <Link to={`/folders/${group.id}`}>
+      <Card className="flex h-full items-center gap-3 p-4 transition-colors hover:border-primary">
+        <Folder className="h-8 w-8 shrink-0 text-primary" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-medium">{group.title || "Folder"}</div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            {group.source_url && <PlatformBadge platform={group.platform} />}
+            <span>
+              {group.item_count} item{group.item_count === 1 ? "" : "s"}
+            </span>
+          </div>
+        </div>
+      </Card>
+    </Link>
   );
 }
 

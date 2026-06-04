@@ -40,6 +40,7 @@ Write a detailed, faithful walkthrough of THIS part as Markdown:
   new topic begins (roughly every 1-3 minutes), rather than timestamping sentences.
 - Be thorough. Do not skip substantive content. Do NOT write an overall title or
   any preamble/conclusion about the whole video — only cover this part.
+- LANGUAGE: {language_instruction}
 
 TRANSCRIPT PART:
 {chunk}
@@ -82,8 +83,33 @@ Rules:
   and conclusions), NOT a full replay of every detail.
 - `quotes`: include the most striking 8-15 verbatim quotes from the walkthrough.
 - timestamps are numbers of seconds (e.g. 95 for 00:01:35), parsed from [HH:MM:SS] markers.
-- Write all text fields in the same language as the walkthrough/description.
+- LANGUAGE: {language_instruction}
 """
+
+# Default directive: keep the model in the source language. Replaced with a
+# stronger Simplified-Chinese mandate when the transcript is Chinese-dominant.
+LANGUAGE_SAME_AS_SOURCE = (
+    "Write all text fields in the SAME language as the transcript/source."
+)
+LANGUAGE_SIMPLIFIED_CHINESE = (
+    "原文为简体中文，因此所有正文必须用【简体中文】撰写，绝对不要翻译成英文或其他语言。"
+    "遇到英文专有名词、产品名、公司名或技术术语（如 AI、RAG、PMF、A/B test 等）时可保留英文原文，"
+    "但叙述、解释与总结一律使用简体中文。"
+)
+
+
+def language_directive(text: str) -> str:
+    """Pick the output-language instruction based on the source text.
+
+    Forces Simplified Chinese when the sample is predominantly CJK so the
+    summarizer stops drifting into English on Chinese (often tech-heavy) sources.
+    """
+    sample = (text or "")[:8000]
+    cjk = sum(1 for ch in sample if "\u4e00" <= ch <= "\u9fff")
+    latin = sum(1 for ch in sample if ch.isascii() and ch.isalpha())
+    if cjk >= 20 and cjk >= latin:
+        return LANGUAGE_SIMPLIFIED_CHINESE
+    return LANGUAGE_SAME_AS_SOURCE
 
 DIRECT_AUDIO_SYSTEM = (
     "You are an expert media analyst. Listen to the audio and produce a faithful, "

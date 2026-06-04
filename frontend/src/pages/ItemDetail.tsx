@@ -68,6 +68,10 @@ export function ItemDetail() {
       navigate("/");
     },
   });
+  const deleteMedia = useMutation({
+    mutationFn: () => api.deleteMedia(itemId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["item", itemId] }),
+  });
 
   if (item.isLoading) return <p className="text-muted-foreground">Loading...</p>;
   if (item.isError || !item.data)
@@ -224,6 +228,9 @@ export function ItemDetail() {
                 ? d.transcript.segments[d.transcript.segments.length - 1].end
                 : null
             }
+            mediaPath={d.media_path}
+            onDeleteMedia={() => deleteMedia.mutate()}
+            deletingMedia={deleteMedia.isPending}
           />
           <ProcessingPanel
             stages={d.stages}
@@ -307,6 +314,9 @@ function MediaPanel({
   likeCount,
   dislikeCount,
   transcriptEnd,
+  mediaPath,
+  onDeleteMedia,
+  deletingMedia,
 }: {
   videoDuration?: number | null;
   audioDuration?: number | null;
@@ -316,6 +326,9 @@ function MediaPanel({
   likeCount?: number | null;
   dislikeCount?: number | null;
   transcriptEnd?: number | null;
+  mediaPath?: string | null;
+  onDeleteMedia: () => void;
+  deletingMedia: boolean;
 }) {
   const pct = (part?: number | null) =>
     videoDuration && part ? Math.min(100, Math.round((part / videoDuration) * 100)) : null;
@@ -356,6 +369,34 @@ function MediaPanel({
                 text={`${formatDuration(transcriptEnd)}${covPct !== null ? ` (${covPct}%)` : ""}`}
                 ok={ok(covPct)}
               />
+            ) : (
+              "—"
+            )
+          }
+        />
+        <MediaRow
+          label="Downloaded file"
+          value={
+            mediaPath ? (
+              <span className="flex items-center gap-2">
+                <a
+                  href={`/media/${mediaPath}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="truncate text-primary hover:underline"
+                  title={mediaPath}
+                >
+                  {mediaPath.split("/").pop()}
+                </a>
+                <button
+                  onClick={onDeleteMedia}
+                  disabled={deletingMedia}
+                  title="Delete the downloaded file (a retry will re-download it)"
+                  className="shrink-0 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </span>
             ) : (
               "—"
             )

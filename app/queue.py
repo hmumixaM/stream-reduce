@@ -5,13 +5,16 @@ from __future__ import annotations
 from functools import lru_cache
 
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry
 
 from app.config import get_settings
 
 QUEUE_NAME = "stream-reduce"
 # Long-form audio transcription + summarization can take a while.
 JOB_TIMEOUT = 60 * 90
+# Backstop for transient failures (flaky CDN download, provider 5xx) that slip
+# past the in-pipeline retries: re-run the whole job with a short backoff.
+ITEM_RETRY = Retry(max=2, interval=[120, 600])
 
 
 @lru_cache
@@ -32,6 +35,7 @@ def enqueue_item(item_id: int) -> str:
         job_id=f"item-{item_id}",
         result_ttl=3600,
         failure_ttl=86400,
+        retry=ITEM_RETRY,
     )
     return job.id
 

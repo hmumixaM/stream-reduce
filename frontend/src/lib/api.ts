@@ -31,10 +31,13 @@ export interface Item {
   status: ItemStatus;
   error?: string | null;
   subscription_id?: number | null;
+  group_id?: number | null;
+  group_position?: number | null;
   is_favorite: boolean;
   is_archived: boolean;
   media_bytes: number;
   audio_duration_s?: number | null;
+  media_path?: string | null;
   enqueued_at: string;
   started_at?: string | null;
   completed_at?: string | null;
@@ -102,6 +105,16 @@ export interface ItemDetail extends Item {
   transcript?: Transcript | null;
   stages: StageRun[];
   comments: Comment[];
+}
+
+export interface Group {
+  id: number;
+  platform: Platform;
+  external_id?: string | null;
+  source_url: string;
+  title?: string | null;
+  item_count: number;
+  created_at: string;
 }
 
 export interface Subscription {
@@ -173,8 +186,10 @@ export const api = {
     q?: string;
     favorite?: boolean;
     archived?: boolean;
+    group_id?: number;
     sort?: string;
     order?: string;
+    limit?: number;
   }) => {
     const sp = new URLSearchParams();
     if (params?.status) sp.set("status", params.status);
@@ -182,11 +197,31 @@ export const api = {
     if (params?.q) sp.set("q", params.q);
     if (params?.favorite !== undefined) sp.set("favorite", String(params.favorite));
     if (params?.archived !== undefined) sp.set("archived", String(params.archived));
+    if (params?.group_id !== undefined) sp.set("group_id", String(params.group_id));
     if (params?.sort) sp.set("sort", params.sort);
     if (params?.order) sp.set("order", params.order);
+    if (params?.limit !== undefined) sp.set("limit", String(params.limit));
     const qs = sp.toString();
     return req<Item[]>(`/api/items${qs ? `?${qs}` : ""}`);
   },
+  listGroups: () => req<Group[]>("/api/items/groups"),
+  createGroup: (title: string) =>
+    req<Group>("/api/items/groups", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }),
+  renameGroup: (id: number, title: string) =>
+    req<Group>(`/api/items/groups/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  deleteGroup: (id: number) =>
+    req<void>(`/api/items/groups/${id}`, { method: "DELETE" }),
+  setItemGroup: (itemId: number, groupId: number | null) =>
+    req<Item>(`/api/items/${itemId}/group`, {
+      method: "POST",
+      body: JSON.stringify({ group_id: groupId }),
+    }),
   getItem: (id: number) => req<ItemDetail>(`/api/items/${id}`),
   addItems: (urls: string[]) =>
     req<Item[]>("/api/items", { method: "POST", body: JSON.stringify({ urls }) }),
@@ -194,6 +229,8 @@ export const api = {
   regenerateItem: (id: number) =>
     req<Item>(`/api/items/${id}/regenerate`, { method: "POST" }),
   deleteItem: (id: number) => req<void>(`/api/items/${id}`, { method: "DELETE" }),
+  deleteMedia: (id: number) =>
+    req<Item>(`/api/items/${id}/media`, { method: "DELETE" }),
   toggleFavorite: (id: number) =>
     req<Item>(`/api/items/${id}/favorite`, { method: "POST" }),
   toggleArchive: (id: number) =>

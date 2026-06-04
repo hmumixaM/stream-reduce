@@ -65,6 +65,23 @@ class Subscription(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class ItemGroup(SQLModel, table=True):
+    """A folder of items. Either ingested together (a YouTube playlist or a
+    Bilibili 合集/系列, with external_id + source_url set) or created by the user
+    as a manual folder (source_url left empty). Items keep a `group_id` +
+    `group_position` back-reference."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    platform: Platform = Field(
+        sa_column=Column(SAEnum(Platform), nullable=False, default=Platform.unknown)
+    )
+    external_id: str | None = Field(default=None, index=True)
+    source_url: str = Field(default="", index=True)
+    title: str | None = None
+    item_count: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Item(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     platform: Platform = Field(
@@ -89,6 +106,10 @@ class Item(SQLModel, table=True):
     error: str | None = Field(default=None, sa_column=Column(Text))
     subscription_id: int | None = Field(default=None, foreign_key="subscription.id", index=True)
 
+    # Playlist / collection grouping (None for standalone items).
+    group_id: int | None = Field(default=None, foreign_key="itemgroup.id", index=True)
+    group_position: int | None = None
+
     # Collection flags
     is_favorite: bool = Field(default=False, index=True)
     is_archived: bool = Field(default=False, index=True)
@@ -96,6 +117,9 @@ class Item(SQLModel, table=True):
     # Downloaded-media metrics (to judge download completeness)
     media_bytes: int = 0
     audio_duration_s: float | None = None
+    # Path of the retained downloaded audio, relative to the media dir (so it can
+    # be served at /media/<media_path>, inspected, and deleted from the UI).
+    media_path: str | None = None
 
     # Aggregate processing metrics (rolled up from stage_run)
     enqueued_at: datetime = Field(default_factory=utcnow)

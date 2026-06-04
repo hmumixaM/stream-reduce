@@ -5,6 +5,10 @@ summaries and keeps them in a searchable library.
 
 - **Sources**: YouTube, Bilibili, Apple Podcasts, 小宇宙 (Xiaoyuzhou), and any
   RSS / RSSHub feed.
+- **Playlists / collections**: paste a YouTube `playlist?list=…` or a Bilibili
+  合集/系列 (`space.bilibili.com/<mid>/lists?sid=…`) URL to ingest every video at
+  once. They're tied to a shared group and shown under a collapsible header in
+  the Library. (A bare `watch?v=…&list=…` is treated as a single video.)
 - **Pipeline**: native transcript first → OpenRouter Whisper transcription →
   Gemini summarization (Gemini models served by a LiteLLM proxy over its
   OpenAI-compatible API). Lossless, timestamp-cited summaries that link back to
@@ -88,7 +92,11 @@ To also run a local RSSHub instance:
 docker compose --profile rsshub up -d
 ```
 
-Data (SQLite DB + downloaded media) is stored in the `app-data` volume.
+Data (SQLite DB + downloaded media) is stored in the `app-data` volume. The
+downloaded audio for each item is **retained** under `/data/media` and shown on
+the item page as a downloadable link, with a delete button to remove just that
+file (useful for debugging a bad download — deleting it lets a single Retry
+re-fetch a clean copy).
 Bilibili / gated content: export your logged-in cookies in Netscape format
 (e.g. with a "Get cookies.txt" browser extension while signed in to bilibili.com)
 and drop the file into `./cookies/`. Any `*.txt` there is auto-detected — no env
@@ -142,3 +150,10 @@ map-reduce: each chunk is summarized losslessly with its `[HH:MM:SS]` markers,
 then merged into a structured summary (TL;DR, timestamped outline, key points,
 quotes, entities). Timestamps render as deep links for YouTube/Bilibili and as
 `HH:MM:SS` references otherwise, so every claim traces back to the source.
+
+The output language follows the source: Chinese-dominant transcripts are
+summarized in 简体中文 (English proper nouns/terms preserved), everything else in
+its own language. Downloads whose decodable audio is far shorter than the
+expected duration (a common flaky-CDN truncation that still reports the full
+length in the container header) are rejected so the item can be retried instead
+of being summarized from only the first few minutes.

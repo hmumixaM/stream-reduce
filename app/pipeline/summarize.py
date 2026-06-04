@@ -18,6 +18,7 @@ from app.pipeline.prompts import (
     MAP_TEMPLATE,
     REDUCE_SYSTEM,
     REDUCE_TEMPLATE,
+    language_directive,
 )
 from app.runtime_config import effective_llm_model, effective_summary_map_model
 
@@ -178,6 +179,10 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
 
     chunks = _chunk_segments(transcript.segments, settings.summary_chunk_chars)
 
+    # Decide the output language once from the actual transcript text so the
+    # whole summary stays consistent (force Simplified Chinese for zh sources).
+    lang_instruction = language_directive(transcript.text or "")
+
     # --- Map step: each chunk becomes a detailed chronological walkthrough. ---
     if tracker is not None:
         tracker.set_chunks(len(chunks))
@@ -186,7 +191,10 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
         # Use the fast model for map; the reduce below uses the main model.
         map_model = effective_summary_map_model()
         result = generate_text(
-            MAP_TEMPLATE.format(index=idx, total=len(chunks), chunk=chunk),
+            MAP_TEMPLATE.format(
+                index=idx, total=len(chunks), chunk=chunk,
+                language_instruction=lang_instruction,
+            ),
             system=MAP_SYSTEM,
             model=map_model,
             max_tokens=settings.summary_map_max_tokens,
@@ -201,6 +209,7 @@ def summarize_item(session: Session, item_id: int, tracker: StageTracker | None 
     reduce_prompt = REDUCE_TEMPLATE.format(
         context=_build_context(item),
         notes=walkthrough,
+        language_instruction=lang_instruction,
     )
     result = generate_text(
         reduce_prompt, system=REDUCE_SYSTEM, max_tokens=settings.summary_reduce_max_tokens
@@ -272,9 +281,13 @@ def summarize_via_gemini_audio(
 
     audio_b64 = base64.b64encode(Path(audio_path).read_bytes()).decode("ascii")
     fmt = Path(audio_path).suffix.lstrip(".") or "mp3"
+    # No transcript here; infer language from the page title + description.
     prompt = REDUCE_TEMPLATE.format(
         context=_build_context(item),
         notes="(use the attached audio as the source)",
+        language_instruction=language_directive(
+            f"{item.title or ''}\n{item.description or ''}"
+        ),
     )
     result = generate_with_audio(prompt, audio_b64, fmt, system=DIRECT_AUDIO_SYSTEM)
     _record(tracker, result)

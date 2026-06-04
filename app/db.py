@@ -49,9 +49,12 @@ _ADDED_COLUMNS = {
         "is_archived": "BOOLEAN NOT NULL DEFAULT 0",
         "media_bytes": "INTEGER NOT NULL DEFAULT 0",
         "audio_duration_s": "FLOAT",
+        "media_path": "VARCHAR",
         "view_count": "INTEGER",
         "like_count": "INTEGER",
         "dislike_count": "INTEGER",
+        "group_id": "INTEGER",
+        "group_position": "INTEGER",
     },
 }
 

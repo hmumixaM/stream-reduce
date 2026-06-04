@@ -19,6 +19,14 @@ from app.pipeline.metrics import StageTracker
 logger = logging.getLogger(__name__)
 
 
+class TruncatedAudioError(RuntimeError):
+    """Raised when the decodable audio is far shorter than the expected length.
+
+    Signals a corrupt/incomplete download whose container header may still claim
+    the full duration. The runner deletes the file so a retry re-downloads it.
+    """
+
+
 @dataclass
 class TranscribeResult:
     language: str | None = None
@@ -42,7 +50,11 @@ class RateLimiter:
         self._last = time.monotonic()
 
 
-def transcribe_audio(audio_path: str, tracker: StageTracker | None = None) -> TranscribeResult:
+def transcribe_audio(
+    audio_path: str,
+    tracker: StageTracker | None = None,
+    expected_duration: float | None = None,
+) -> TranscribeResult:
     settings = get_settings()
     if not settings.openrouter_api_key:
         raise RuntimeError("OPENROUTER_API_KEY is not configured")
@@ -53,6 +65,20 @@ def transcribe_audio(audio_path: str, tracker: StageTracker | None = None) -> Tr
         chunks = split_audio(audio_path, settings.transcribe_chunk_seconds, workdir)
         if not chunks:
             raise RuntimeError(f"no audio chunks produced from {audio_path}")
+
+        # Chunks are re-encoded (i.e. fully decoded) by ffmpeg, so their summed
+        # length is the REAL transcribable audio — unlike the container header,
+        # which can claim the full duration even when the stream is truncated
+        # (a common flaky-CDN download failure). Bail out loudly so the item is
+        # retried instead of silently summarizing only the first minutes.
+        chunk_durations = [probe_duration(c) for c in chunks]
+        decodable = sum(chunk_durations)
+        if expected_duration and decodable < expected_duration * 0.9:
+            raise TruncatedAudioError(
+                f"truncated audio: only {decodable:.0f}s decodable of expected "
+                f"{expected_duration:.0f}s ({decodable / expected_duration:.0%}); "
+                "the download is incomplete — will retry"
+            )
         if tracker is not None:
             tracker.set_chunks(len(chunks))
 
@@ -62,7 +88,7 @@ def transcribe_audio(audio_path: str, tracker: StageTracker | None = None) -> Tr
         with httpx.Client(timeout=300) as client:
             for idx, chunk in enumerate(chunks):
                 limiter.wait()
-                duration = probe_duration(chunk)
+                duration = chunk_durations[idx]
                 text, detected = _transcribe_chunk(client, chunk, settings, tracker)
                 language = language or detected
                 if text:

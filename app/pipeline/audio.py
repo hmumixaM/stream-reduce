@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
+_FFMPEG_TIME = re.compile(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)")
+
 
 def probe_duration(path: str | Path) -> float:
-    """Return audio duration in seconds (0.0 if unknown)."""
+    """Return the container-reported audio duration in seconds (0.0 if unknown).
+
+    This trusts the file header/moov, which can claim the full length even when
+    the stream is truncated or corrupt mid-file. Use decodable_duration() when
+    you need the *real* playable length.
+    """
     out = subprocess.run(
         [
             "ffprobe", "-v", "error",
@@ -21,6 +29,28 @@ def probe_duration(path: str | Path) -> float:
         return float(out.stdout.strip())
     except ValueError:
         return 0.0
+
+
+def decodable_duration(path: str | Path) -> float:
+    """Return how many seconds ffmpeg can actually DECODE from the file.
+
+    Unlike probe_duration (which trusts the container header), this fully decodes
+    the audio stream and reports how far it got. A byte-complete but mid-stream
+    corrupt download — a common Bilibili flaky-CDN failure whose header still
+    advertises the full duration — reports its true (short) decodable length here.
+    """
+    proc = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-v", "error", "-stats",
+            "-i", str(path), "-vn", "-f", "null", "-",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    matches = _FFMPEG_TIME.findall(proc.stderr)
+    if not matches:
+        return 0.0
+    hours, minutes, seconds = matches[-1]
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
 def split_audio(path: str | Path, chunk_seconds: int, workdir: Path) -> list[Path]:

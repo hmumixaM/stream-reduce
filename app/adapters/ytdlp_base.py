@@ -67,6 +67,35 @@ class YtDlpAdapter(Adapter):
         with YoutubeDL(self._ydl_opts(extra)) as ydl:
             return ydl.extract_info(url, download=download)
 
+    def extract_entries(self, url: str) -> dict | None:
+        """Flat-extract a playlist/collection URL into its entries.
+
+        Returns {"title", "external_id", "entries": [{source_url, title,
+        external_id}, ...]} or None when the URL isn't a non-empty playlist.
+        """
+        info = self._extract_info(url, extra={"extract_flat": "in_playlist"})
+        if info.get("_type") != "playlist":
+            return None
+        entries: list[dict] = []
+        for entry in info.get("entries") or []:
+            if not entry:
+                continue
+            entry_url = entry.get("url") or entry.get("webpage_url")
+            if not entry_url:
+                continue
+            entries.append({
+                "source_url": entry_url,
+                "title": entry.get("title"),
+                "external_id": entry.get("id"),
+            })
+        if not entries:
+            return None
+        return {
+            "title": info.get("title"),
+            "external_id": info.get("id"),
+            "entries": entries,
+        }
+
     def fetch_metadata(self, url: str) -> ContentMeta:
         info = self._extract_info(url)
         published = None

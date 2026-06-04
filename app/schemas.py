@@ -78,10 +78,13 @@ class ItemRead(BaseModel):
     status: ItemStatus
     error: str | None
     subscription_id: int | None
+    group_id: int | None = None
+    group_position: int | None = None
     is_favorite: bool = False
     is_archived: bool = False
     media_bytes: int = 0
     audio_duration_s: float | None = None
+    media_path: str | None = None
     enqueued_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
@@ -91,6 +94,30 @@ class ItemRead(BaseModel):
     total_cost_usd: float
     retry_count: int
     created_at: datetime
+
+
+class GroupRead(BaseModel):
+    id: int
+    platform: Platform
+    external_id: str | None
+    source_url: str
+    title: str | None
+    item_count: int
+    created_at: datetime
+
+
+class GroupCreate(BaseModel):
+    title: str
+
+
+class GroupUpdate(BaseModel):
+    title: str
+
+
+class ItemGroupAssign(BaseModel):
+    """Move an item into a folder (group_id) or out of any folder (null)."""
+
+    group_id: int | None = None
 
 
 class CommentRead(BaseModel):

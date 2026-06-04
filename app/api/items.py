@@ -8,14 +8,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, col, select
 
 from app.db import get_session
-from app.models import Comment, Item, ItemStatus, Platform, StageRun, Summary, Transcript
-from app.pipeline.ingest import create_item_from_url
+from app.models import (
+    Comment,
+    Item,
+    ItemGroup,
+    ItemStatus,
+    Platform,
+    StageRun,
+    Summary,
+    Transcript,
+)
+from app.pipeline.ingest import create_group_from_url, create_item_from_url
 from app.queue import enqueue_item, enqueue_resummarize
 from app.schemas import (
     AddItemRequest,
     CommentCreate,
     CommentRead,
+    GroupCreate,
+    GroupRead,
+    GroupUpdate,
     ItemDetail,
+    ItemGroupAssign,
     ItemRead,
     StageRunRead,
     SummaryRead,
@@ -37,14 +50,75 @@ def add_items(payload: AddItemRequest, session: Session = Depends(get_session)) 
 
     created: list[Item] = []
     seen_ids: set[int] = set()
-    for url in urls:
-        item = create_item_from_url(session, url)  # normalizes + dedups vs DB
+
+    def _add(item: Item) -> None:
         if item.id in seen_ids:
-            continue
+            return
         seen_ids.add(item.id)
         enqueue_item(item.id)
         created.append(item)
+
+    for url in urls:
+        # A playlist/collection URL expands into many grouped items; a plain
+        # URL becomes a single item.
+        group = create_group_from_url(session, url)
+        if group is not None:
+            for item in group[1]:
+                _add(item)
+            continue
+        _add(create_item_from_url(session, url))  # normalizes + dedups vs DB
     return created
+
+
+@router.get("/groups", response_model=list[GroupRead])
+def list_groups(session: Session = Depends(get_session)) -> list[ItemGroup]:
+    return list(
+        session.exec(select(ItemGroup).order_by(col(ItemGroup.created_at).desc())).all()
+    )
+
+
+@router.post("/groups", response_model=GroupRead)
+def create_group(payload: GroupCreate, session: Session = Depends(get_session)) -> ItemGroup:
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="empty folder name")
+    group = ItemGroup(platform=Platform.unknown, source_url="", title=title, item_count=0)
+    session.add(group)
+    session.commit()
+    session.refresh(group)
+    return group
+
+
+@router.patch("/groups/{group_id}", response_model=GroupRead)
+def rename_group(
+    group_id: int, payload: GroupUpdate, session: Session = Depends(get_session)
+) -> ItemGroup:
+    group = session.get(ItemGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="folder not found")
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="empty folder name")
+    group.title = title
+    session.add(group)
+    session.commit()
+    session.refresh(group)
+    return group
+
+
+@router.delete("/groups/{group_id}")
+def delete_group(group_id: int, session: Session = Depends(get_session)) -> dict:
+    """Delete a folder. Its items are kept and simply detached from the folder."""
+    group = session.get(ItemGroup, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="folder not found")
+    for item in session.exec(select(Item).where(Item.group_id == group_id)).all():
+        item.group_id = None
+        item.group_position = None
+        session.add(item)
+    session.delete(group)
+    session.commit()
+    return {"ok": True}
 
 
 _SORT_COLUMNS = {
@@ -64,6 +138,7 @@ def list_items(
     q: str | None = None,
     favorite: bool | None = None,
     archived: bool | None = None,
+    group_id: int | None = None,
     sort: str = "added",
     order: str = "desc",
     limit: int = Query(default=100, le=500),
@@ -78,6 +153,8 @@ def list_items(
         stmt = stmt.where(Item.is_favorite == favorite)
     if archived is not None:
         stmt = stmt.where(Item.is_archived == archived)
+    if group_id is not None:
+        stmt = stmt.where(Item.group_id == group_id)
     if q:
         stmt = stmt.where(col(Item.title).ilike(f"%{q}%"))
 
@@ -125,6 +202,34 @@ def retry_item(item_id: int, session: Session = Depends(get_session)) -> Item:
     session.refresh(item)
     enqueue_item(item.id)
     return item
+
+
+@router.post("/{item_id}/group", response_model=ItemRead)
+def set_item_group(
+    item_id: int, payload: ItemGroupAssign, session: Session = Depends(get_session)
+) -> Item:
+    """Move an item into a folder (group_id) or detach it (group_id=null)."""
+    item = _get_or_404(session, item_id)
+    old_group_id = item.group_id
+    new_group_id = payload.group_id
+    if new_group_id is not None:
+        group = session.get(ItemGroup, new_group_id)
+        if group is None:
+            raise HTTPException(status_code=404, detail="folder not found")
+        # Append to the end of the destination folder.
+        members = session.exec(select(Item).where(Item.group_id == new_group_id)).all()
+        item.group_position = len(members)
+    else:
+        item.group_position = None
+    item.group_id = new_group_id
+    session.add(item)
+    session.commit()
+    if old_group_id is not None and old_group_id != new_group_id:
+        _refresh_group(session, old_group_id)
+    if new_group_id is not None:
+        _refresh_group(session, new_group_id)
+    session.refresh(item)
+    return ItemRead.model_validate(item, from_attributes=True)
 
 
 @router.post("/{item_id}/regenerate", response_model=ItemRead)
@@ -200,17 +305,64 @@ def delete_comment(
     return {"ok": True}
 
 
+@router.delete("/{item_id}/media")
+def delete_media(item_id: int, session: Session = Depends(get_session)) -> ItemRead:
+    """Delete only the retained downloaded audio file (keeps the item + summary).
+
+    Handy for debugging a bad download: removing the file lets a single Retry
+    re-download a clean copy.
+    """
+    item = _get_or_404(session, item_id)
+    _delete_media_file(item)
+    item.media_path = None
+    item.media_bytes = 0
+    item.audio_duration_s = None
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return ItemRead.model_validate(item, from_attributes=True)
+
+
 @router.delete("/{item_id}")
 def delete_item(item_id: int, session: Session = Depends(get_session)) -> dict:
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(status_code=404, detail="item not found")
+    group_id = item.group_id
+    _delete_media_file(item)
     for model in (Summary, Transcript, StageRun, Comment):
         for row in session.exec(select(model).where(model.item_id == item_id)).all():
             session.delete(row)
     session.delete(item)
     session.commit()
+    if group_id is not None:
+        _refresh_group(session, group_id)
     return {"ok": True}
+
+
+def _delete_media_file(item: Item) -> None:
+    """Remove the item's retained audio file from disk, if present."""
+    if not item.media_path:
+        return
+    from app.config import get_settings
+
+    path = (get_settings().resolved_media_dir / item.media_path).resolve()
+    media_root = get_settings().resolved_media_dir.resolve()
+    # Guard against path traversal: only delete inside the media dir.
+    if media_root in path.parents:
+        path.unlink(missing_ok=True)
+
+
+def _refresh_group(session: Session, group_id: int) -> None:
+    """Keep a folder's item_count fresh. Empty folders are kept (the user may
+    have just created one, or emptied a playlist intentionally)."""
+    group = session.get(ItemGroup, group_id)
+    if group is None:
+        return
+    remaining = list(session.exec(select(Item).where(Item.group_id == group_id)).all())
+    group.item_count = len(remaining)
+    session.add(group)
+    session.commit()
 
 
 def _get_or_404(session: Session, item_id: int) -> Item:
