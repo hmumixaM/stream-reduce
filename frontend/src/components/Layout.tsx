@@ -46,7 +46,8 @@ function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
         <h2 className="mb-1 text-lg font-semibold">Add content</h2>
         <p className="mb-4 text-sm text-muted-foreground">
           Paste one or more YouTube, Bilibili, Apple Podcast, 小宇宙, or direct
-          media URLs — one per line. Tracking params are stripped automatically.
+          media URLs — one per line. A playlist or whole podcast show expands
+          into a folder of episodes. Tracking params are stripped automatically.
         </p>
         <form
           onSubmit={(e) => {
@@ -97,9 +98,7 @@ export function Layout() {
     <div className="flex min-h-screen">
       <aside className="flex w-60 flex-col border-r border-border bg-card/40 p-4">
         <div className="mb-6 flex items-center gap-2 px-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold">
-            S
-          </div>
+          <img src="/logo.png" alt="" className="h-8 w-8 rounded-md" />
           <span className="text-lg font-semibold">stream-reduce</span>
         </div>
         <Button className="mb-4 w-full" onClick={() => setAddOpen(true)}>

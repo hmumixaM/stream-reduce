@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { Folder, FolderPlus } from "lucide-react";
 import { api, type Group } from "@/lib/api";
 import { Button, Card, Input, Select } from "@/components/ui";
@@ -8,6 +13,7 @@ import { PlatformBadge } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
+const PAGE_SIZE = 60;
 type View = "all" | "favorites" | "archived";
 
 const SORTS: { value: string; label: string }[] = [
@@ -25,17 +31,25 @@ export function Library() {
   const [sort, setSort] = useState<string>("added");
   const qc = useQueryClient();
 
-  const params = {
+  // Folders are first-class navigation (always shown); the flat grid lists
+  // ungrouped items while simply browsing, or everything when filtering/searching.
+  const browsing = view === "all" && !q;
+  const itemParams = {
     q: q || undefined,
     platform: platform || undefined,
     favorite: view === "favorites" ? true : undefined,
     archived: view === "archived" ? true : false,
+    ungrouped: browsing ? true : undefined,
     sort,
     order: "desc",
   };
-  const items = useQuery({
-    queryKey: ["items", { q, platform, view, sort }],
-    queryFn: () => api.listItems(params),
+  const items = useInfiniteQuery({
+    queryKey: ["items", { q, platform, view, sort, browsing }],
+    queryFn: ({ pageParam }) =>
+      api.listItems({ ...itemParams, limit: PAGE_SIZE, offset: pageParam }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
     refetchInterval: 8000,
   });
   const groups = useQuery({
@@ -75,14 +89,7 @@ export function Library() {
     onCreateFolderAndMove: (id, title) => createAndMove.mutate({ id, title }),
   };
 
-  const all = items.data ?? [];
-  // Folders are first-class navigation (always visible); the flat item grid
-  // shows ungrouped items. A search/favorites/archived view flattens everything
-  // so items can be found regardless of which folder they live in.
-  const browsing = view === "all" && !q;
-  const visibleItems = browsing
-    ? all.filter((i) => i.group_id == null)
-    : all;
+  const visibleItems = items.data?.pages.flat() ?? [];
   const folders = groups.data ?? [];
 
   const handleNewFolder = () => {
@@ -96,7 +103,9 @@ export function Library() {
         <div>
           <h1 className="text-2xl font-semibold">Library</h1>
           <p className="text-sm text-muted-foreground">
-            {all.length} {view === "archived" ? "archived" : "summaries"}
+            {visibleItems.length}
+            {items.hasNextPage ? "+" : ""}{" "}
+            {view === "archived" ? "archived" : "summaries"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -164,11 +173,24 @@ export function Library() {
       {items.isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : visibleItems.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {visibleItems.map((item) => (
-            <ItemCard key={item.id} item={item} {...actions} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {visibleItems.map((item) => (
+              <ItemCard key={item.id} item={item} {...actions} />
+            ))}
+          </div>
+          {items.hasNextPage && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                variant="outline"
+                onClick={() => items.fetchNextPage()}
+                disabled={items.isFetchingNextPage}
+              >
+                {items.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          )}
+        </>
       ) : folders.length > 0 && browsing ? (
         <Card className="p-10 text-center text-muted-foreground">
           All items are organized into folders. Open a folder to browse.

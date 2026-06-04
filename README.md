@@ -1,14 +1,20 @@
 # stream-reduce
 
+**Website:** https://hedgefundprod.github.io/stream-reduce/
+
 Self-hosted media summarizer. Turns videos and podcasts into source-traceable
 summaries and keeps them in a searchable library.
 
 - **Sources**: YouTube, Bilibili, Apple Podcasts, 小宇宙 (Xiaoyuzhou), and any
   RSS / RSSHub feed.
-- **Playlists / collections**: paste a YouTube `playlist?list=…` or a Bilibili
-  合集/系列 (`space.bilibili.com/<mid>/lists?sid=…`) URL to ingest every video at
-  once. They're tied to a shared group and shown under a collapsible header in
-  the Library. (A bare `watch?v=…&list=…` is treated as a single video.)
+- **Playlists / collections / shows**: paste a YouTube `playlist?list=…`, a
+  Bilibili 合集/系列 (`space.bilibili.com/<mid>/lists?sid=…`), an Apple Podcasts
+  show (`podcasts.apple.com/.../id…`), or a Xiaoyuzhou podcast
+  (`xiaoyuzhoufm.com/podcast/…`) URL to ingest every episode at once. They land
+  in a shared folder in the Library. Apple shows expand to the full episode list
+  (via the iTunes API); Xiaoyuzhou returns the most recent episodes embedded in
+  the page. A bare `watch?v=…&list=…` or a single-episode URL stays a single
+  item.
 - **Pipeline**: native transcript first → OpenRouter Whisper transcription →
   Gemini summarization (Gemini models served by a LiteLLM proxy over its
   OpenAI-compatible API). Lossless, timestamp-cited summaries that link back to

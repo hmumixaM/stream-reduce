@@ -6,6 +6,7 @@ import re
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import feedparser
 import httpx
@@ -79,6 +80,43 @@ class ApplePodcastAdapter(Adapter):
         if entry is None:
             return {}
         return _entry_to_result(entry)
+
+    def extract_entries(self, url: str) -> dict | None:
+        """Expand an Apple Podcasts *show* URL into all of its episodes.
+
+        Uses the iTunes Lookup API (entity=podcastEpisode), which returns the
+        show as the first result followed by its episodes. Each episode becomes
+        a canonical `.../id<show>?i=<trackId>` URL so it resolves to full
+        per-episode metadata + audio on processing. Returns None for episode
+        URLs (those carry `?i=`) or shows with no episodes.
+        """
+        podcast_id, episode_id = _parse_ids(url)
+        if not podcast_id or episode_id:
+            return None
+        resp = httpx.get(
+            ITUNES_LOOKUP,
+            params={"id": podcast_id, "entity": "podcastEpisode", "limit": 200},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if not results:
+            return None
+        show = results[0]
+        episodes = [r for r in results if r.get("kind") == "podcast-episode"]
+        if not episodes:
+            return None
+        base = urlunparse(urlparse(url)._replace(query="", fragment=""))
+        entries = [
+            {"source_url": f"{base}?i={ep['trackId']}", "title": ep.get("trackName")}
+            for ep in episodes
+            if ep.get("trackId")
+        ]
+        return {
+            "external_id": str(show.get("collectionId") or podcast_id),
+            "title": show.get("collectionName") or show.get("trackName"),
+            "entries": entries,
+        }
 
     def fetch_metadata(self, url: str) -> ContentMeta:
         r = self._resolve(url)

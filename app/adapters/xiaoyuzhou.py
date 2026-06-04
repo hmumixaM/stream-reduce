@@ -35,6 +35,11 @@ def _episode_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _podcast_id(url: str) -> str | None:
+    m = re.search(r"/podcast/([0-9a-fA-F]+)", url)
+    return m.group(1) if m else None
+
+
 def _html_to_text(raw: str) -> str:
     """Flatten show-notes HTML into readable plain text with line breaks."""
     if not raw:
@@ -119,6 +124,47 @@ class XiaoyuzhouAdapter(Adapter):
             "description": description,
             "view_count": episode.get("playCount"),
             "like_count": episode.get("clapCount"),
+        }
+
+    def extract_entries(self, url: str) -> dict | None:
+        """Expand a Xiaoyuzhou *podcast* page into its episodes.
+
+        The podcast page server-renders its most recent episodes inside
+        `__NEXT_DATA__` (props.pageProps.podcast.episodes); deeper history is
+        lazy-loaded behind an authenticated API, so this returns the recent
+        batch (typically ~15-20). Returns None for episode pages or when no
+        episodes are embedded.
+        """
+        if not _podcast_id(url) or _episode_id(url):
+            return None
+        resp = httpx.get(url, headers=_HEADERS, follow_redirects=True, timeout=30)
+        resp.raise_for_status()
+        m = re.search(
+            r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, re.DOTALL
+        )
+        if not m:
+            return None
+        podcast = (
+            json.loads(m.group(1))
+            .get("props", {})
+            .get("pageProps", {})
+            .get("podcast", {})
+        )
+        episodes = podcast.get("episodes") or []
+        entries = [
+            {
+                "source_url": f"https://www.xiaoyuzhoufm.com/episode/{ep['eid']}",
+                "title": ep.get("title"),
+            }
+            for ep in episodes
+            if ep.get("eid")
+        ]
+        if not entries:
+            return None
+        return {
+            "external_id": podcast.get("pid") or _podcast_id(url),
+            "title": podcast.get("title"),
+            "entries": entries,
         }
 
     def fetch_metadata(self, url: str) -> ContentMeta:

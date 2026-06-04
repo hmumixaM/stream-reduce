@@ -1,8 +1,10 @@
 """Detect playlist/collection URLs and expand them into their entries.
 
-A *playlist URL* is one that points at a collection of videos rather than a
-single video: a YouTube `/playlist?list=...`, or a Bilibili 合集/系列/收藏夹.
-A bare `watch?v=...&list=...` is deliberately treated as a single video.
+A *playlist URL* is one that points at a collection of videos/episodes rather
+than a single one: a YouTube `/playlist?list=...`, a Bilibili 合集/系列/收藏夹,
+an Apple Podcasts show page, or a Xiaoyuzhou (小宇宙) podcast page. A bare
+`watch?v=...&list=...` or an Apple/Xiaoyuzhou *episode* URL is deliberately
+treated as a single item.
 """
 
 from __future__ import annotations
@@ -65,6 +67,19 @@ def playlist_candidates(url: str) -> list[str]:
     # Classic medialist playlists, e.g. bilibili.com/medialist/detail/ml<id>
     if "bilibili.com" in host and parsed.path.startswith("/medialist"):
         return [url]
+
+    # --- Apple Podcasts show page (all episodes) ---
+    # A show is /podcast/<slug>/id<digits>; an episode adds ?i=<episode_id>.
+    if "podcasts.apple.com" in host or "podcast.apple.com" in host:
+        if re.search(r"/id\d+", parsed.path) and "i" not in query:
+            return [url]
+        return []
+
+    # --- Xiaoyuzhou (小宇宙) podcast page (recent episodes) ---
+    if host.endswith("xiaoyuzhoufm.com"):
+        if re.match(r"/podcast/[0-9a-fA-F]+", parsed.path):
+            return [url]
+        return []
 
     return []
 

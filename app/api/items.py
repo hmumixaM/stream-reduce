@@ -127,6 +127,7 @@ _SORT_COLUMNS = {
     "views": Item.view_count,
     "likes": Item.like_count,
     "duration": Item.duration_s,
+    "position": Item.group_position,
 }
 
 
@@ -139,6 +140,7 @@ def list_items(
     favorite: bool | None = None,
     archived: bool | None = None,
     group_id: int | None = None,
+    ungrouped: bool | None = None,
     sort: str = "added",
     order: str = "desc",
     limit: int = Query(default=100, le=500),
@@ -155,6 +157,8 @@ def list_items(
         stmt = stmt.where(Item.is_archived == archived)
     if group_id is not None:
         stmt = stmt.where(Item.group_id == group_id)
+    if ungrouped:
+        stmt = stmt.where(col(Item.group_id).is_(None))
     if q:
         stmt = stmt.where(col(Item.title).ilike(f"%{q}%"))
 

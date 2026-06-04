@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { ArrowLeft, Film, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Item } from "@/lib/api";
 import { Button, Card, Input } from "@/components/ui";
 import { PlatformBadge } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
+
+const PAGE_SIZE = 60;
 
 export function FolderView() {
   const { id } = useParams();
@@ -17,9 +24,19 @@ export function FolderView() {
   const groups = useQuery({ queryKey: ["groups"], queryFn: () => api.listGroups() });
   const folder = (groups.data ?? []).find((g) => g.id === folderId);
 
-  const items = useQuery({
+  const items = useInfiniteQuery({
     queryKey: ["items", { group_id: folderId }],
-    queryFn: () => api.listItems({ group_id: folderId }),
+    queryFn: ({ pageParam }) =>
+      api.listItems({
+        group_id: folderId,
+        sort: "position",
+        order: "asc",
+        limit: PAGE_SIZE,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === PAGE_SIZE ? allPages.length * PAGE_SIZE : undefined,
     refetchInterval: 8000,
   });
 
@@ -61,9 +78,7 @@ export function FolderView() {
     onCreateFolderAndMove: (itemId, title) => createAndMove.mutate({ id: itemId, title }),
   };
 
-  const members = (items.data ?? []).sort(
-    (a, b) => (a.group_position ?? 0) - (b.group_position ?? 0),
-  );
+  const members = items.data?.pages.flat() ?? [];
 
   const handleRename = () => {
     const title = window.prompt("Rename folder", folder?.title || "")?.trim();
@@ -88,7 +103,9 @@ export function FolderView() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold">{folder?.title || "Folder"}</h1>
           {folder?.source_url && <PlatformBadge platform={folder.platform} />}
-          <span className="text-sm text-muted-foreground">{members.length} items</span>
+          <span className="text-sm text-muted-foreground">
+            {folder?.item_count ?? members.length} items
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
@@ -106,11 +123,24 @@ export function FolderView() {
       {items.isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : members.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {members.map((item) => (
-            <ItemCard key={item.id} item={item} {...actions} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {members.map((item) => (
+              <ItemCard key={item.id} item={item} {...actions} />
+            ))}
+          </div>
+          {items.hasNextPage && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                variant="outline"
+                onClick={() => items.fetchNextPage()}
+                disabled={items.isFetchingNextPage}
+              >
+                {items.isFetchingNextPage ? "Loading…" : "Load more"}
+              </Button>
+            </div>
+          )}
+        </>
       ) : (
         <Card className="p-10 text-center text-muted-foreground">
           This folder is empty. Click "Add items" to fill it.

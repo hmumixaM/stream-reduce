@@ -49,5 +49,34 @@ def test_youtube_playlist_page_is_playlist():
     assert cands == ["https://www.youtube.com/playlist?list=PL999"]
 
 
+def test_apple_show_is_playlist():
+    url = "https://podcasts.apple.com/us/podcast/openai-podcast/id1820330260"
+    assert playlist_candidates(url) == [url]
+
+
+def test_apple_episode_is_single_item():
+    # An episode URL carries ?i=<episode_id> and must not expand.
+    assert (
+        playlist_candidates(
+            "https://podcasts.apple.com/us/podcast/openai-podcast/id1820330260?i=1000771190131"
+        )
+        == []
+    )
+
+
+def test_xiaoyuzhou_podcast_is_playlist():
+    url = "https://www.xiaoyuzhoufm.com/podcast/5e73a1a9418a84a0468aa0bd"
+    assert playlist_candidates(url) == [url]
+
+
+def test_xiaoyuzhou_episode_is_single_item():
+    assert (
+        playlist_candidates(
+            "https://www.xiaoyuzhoufm.com/episode/6714dc9cdb2cf827578d4c9e"
+        )
+        == []
+    )
+
+
 def test_non_playlist_url():
     assert is_playlist_url("https://www.bilibili.com/video/BV1jTedzREds") is False

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>stream-reduce — turn videos & podcasts into source-traceable summaries</title>
+    <meta
+      name="description"
+      content="Self-hosted media summarizer. Turn YouTube, Bilibili, Apple Podcasts, 小宇宙 and RSS into timestamped, source-traceable summaries — organized in a searchable library. Runs on a NAS, no GPU."
+    />
+    <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="./assets/favicon-16.png" />
+    <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="stream-reduce" />
+    <meta
+      property="og:description"
+      content="Turn videos & podcasts into source-traceable summaries. Self-hosted, multi-source, no GPU."
+    />
+    <meta property="og:image" content="./assets/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+
+    <!-- NAV -->
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top">
+          <img src="./assets/logo-icon.png" alt="stream-reduce logo" />
+          <span>stream-reduce</span>
+        </a>
+        <nav class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#screens">Screenshots</a>
+          <a href="#start">Self-host</a>
+          <a class="btn btn-primary" href="https://github.com/hedgefundprod/stream-reduce">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
+            GitHub
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <!-- HERO -->
+    <main id="top">
+      <section class="hero wrap">
+        <span class="eyebrow"><span class="dot"></span> Open source · self-hosted · no GPU required</span>
+        <h1>Turn videos &amp; podcasts into<br /><span class="grad">source-traceable summaries</span></h1>
+        <p class="lead">
+          stream-reduce ingests YouTube, Bilibili, Apple Podcasts, 小宇宙 and any RSS feed,
+          transcribes them, and writes timestamped summaries that link back to the exact
+          moment in the source — all kept in a searchable, folder-organized library.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/hedgefundprod/stream-reduce">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2 0-.4-.5-1.6.2-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.7 18 5 18 5c.7 1.6.2 2.8.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
+            View on GitHub
+          </a>
+          <a class="btn btn-ghost" href="#start">Self-host in minutes →</a>
+        </div>
+        <div class="sources">
+          <span><b>YouTube</b></span>
+          <span><b>Bilibili</b></span>
+          <span><b>Apple Podcasts</b></span>
+          <span><b>小宇宙</b></span>
+          <span><b>RSS / RSSHub</b></span>
+        </div>
+      </section>
+
+      <div class="wrap">
+        <div class="shot hero-shot">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <img src="./assets/shots/detail.png" alt="A source-traceable summary in stream-reduce" />
+        </div>
+      </div>
+
+      <!-- FEATURES -->
+      <section id="features" class="wrap">
+        <div class="section-head">
+          <span class="kicker">Features</span>
+          <h2>Everything you need to read instead of watch</h2>
+          <p>From a flaky-CDN-proof download pipeline to source-cited summaries and a tidy library.</p>
+        </div>
+        <div class="features">
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></div>
+            <h3>Many sources</h3>
+            <p>YouTube, Bilibili, Apple Podcasts, 小宇宙, and any RSS / RSSHub feed — paste a link or a whole playlist.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+            <h3>Source-traceable</h3>
+            <p>Every claim carries an <code>[HH:MM:SS]</code> marker that deep-links straight to the moment in the original video.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+            <h3>Folders &amp; library</h3>
+            <p>Organize summaries into folders, favorite, archive, search, and sort by views, likes, date or length.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg></div>
+            <h3>Subscriptions</h3>
+            <p>Poll feeds and channels on a schedule and auto-summarize new episodes as they appear.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+            <h3>Queue &amp; stats</h3>
+            <p>A live processing queue and a dashboard of time, requests, tokens and cost per pipeline stage.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></div>
+            <h3>Multilingual</h3>
+            <p>Output follows the source: Chinese-dominant talks are summarized in 简体中文 (English terms preserved), everything else in its own language.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+            <h3>Robust downloads</h3>
+            <p>Decode-verified downloads with automatic clean re-fetch survive flaky CDNs — no more silently truncated audio.</p>
+          </div>
+          <div class="feature">
+            <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg></div>
+            <h3>Self-hosted</h3>
+            <p>FastAPI + SQLite + Redis and a React UI in one Docker Compose stack. Runs entirely on a NAS — no GPU.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW IT WORKS -->
+      <section id="how" class="wrap">
+        <div class="section-head">
+          <span class="kicker">How it works</span>
+          <h2>A losslessly source-cited pipeline</h2>
+          <p>Native captions when available, otherwise transcription — then a map-reduce summary that keeps every timestamp.</p>
+        </div>
+        <div class="pipe">
+          <div class="step">
+            <div class="n">01</div>
+            <h4>Ingest</h4>
+            <p>yt-dlp / iTunes / RSS fetch metadata and audio. Downloads are decode-verified and retried on corruption.</p>
+          </div>
+          <div class="step">
+            <div class="n">02</div>
+            <h4>Transcribe</h4>
+            <p>Use the native transcript if present, else OpenRouter Whisper with timestamped <code>{start, end}</code> segments.</p>
+          </div>
+          <div class="step">
+            <div class="n">03</div>
+            <h4>Summarize</h4>
+            <p>Gemini (via a LiteLLM proxy) map-reduces chunks into a structured, timestamp-cited summary.</p>
+          </div>
+          <div class="step">
+            <div class="n">04</div>
+            <h4>Library</h4>
+            <p>TL;DR, outline, key points, quotes and entities — searchable, foldered, and deep-linked to the source.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SCREENSHOTS -->
+      <section id="screens" class="wrap">
+        <div class="section-head">
+          <span class="kicker">Screenshots</span>
+          <h2>The actual app</h2>
+          <p>Real screens from a running instance — a fast, keyboard-friendly dark UI.</p>
+        </div>
+        <div class="gallery">
+          <figure class="item full">
+            <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="./assets/shots/library.png" alt="Library with folders" /></div>
+            <figcaption><b>Library</b> — folders, filters, and rich item cards with platform, views and cost.</figcaption>
+          </figure>
+          <figure class="item">
+            <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="./assets/shots/folder.png" alt="A folder of grouped items" /></div>
+            <figcaption><b>Folders</b> — group playlists or build your own collections.</figcaption>
+          </figure>
+          <figure class="item">
+            <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="./assets/shots/stats.png" alt="Stats dashboard" /></div>
+            <figcaption><b>Stats</b> — time, tokens and cost per stage at a glance.</figcaption>
+          </figure>
+          <figure class="item">
+            <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="./assets/shots/queue.png" alt="Live processing queue" /></div>
+            <figcaption><b>Queue</b> — watch items move through the pipeline live.</figcaption>
+          </figure>
+          <figure class="item">
+            <div class="shot"><div class="bar"><i></i><i></i><i></i></div><img src="./assets/shots/detail.png" alt="Item detail with summary" /></div>
+            <figcaption><b>Summary</b> — TL;DR, outline, sentiment, coverage and per-stage metrics.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- GET STARTED -->
+      <section id="start" class="wrap">
+        <div class="section-head">
+          <span class="kicker">Self-host</span>
+          <h2>Up and running in minutes</h2>
+          <p>One Docker Compose stack pulls a prebuilt multi-arch image — nothing to build on your NAS.</p>
+        </div>
+        <div class="start">
+          <div class="code"><pre><span class="c"># clone &amp; configure</span>
+git clone https://github.com/hedgefundprod/stream-reduce
+cd stream-reduce
+cp .env.example .env   <span class="c"># add your API keys</span>
+
+<span class="c"># pull the prebuilt image &amp; launch</span>
+docker compose pull
+docker compose up -d
+
+<span class="g">➜ open http://localhost:8010</span></pre></div>
+          <div>
+            <ul>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>No GPU.</b> Transcription via OpenRouter, summaries via Gemini behind a LiteLLM proxy.</span></li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>Multi-arch image</b> (amd64 + arm64) — ideal for a Synology / low-power NAS.</span></li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>Your data stays yours.</b> SQLite + retained media live in a local volume.</span></li>
+              <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg><span><b>Bilibili-ready.</b> Drop a cookies file in <code>./cookies/</code> to unlock gated streams.</span></li>
+            </ul>
+            <a class="btn btn-primary" href="https://github.com/hedgefundprod/stream-reduce#readme" style="margin-top: 10px;">Read the docs →</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="wrap foot-inner">
+        <a class="brand" href="#top"><img src="./assets/favicon-32.png" alt="" style="width:24px;height:24px;border-radius:6px" /> stream-reduce</a>
+        <span class="spacer"></span>
+        <a href="https://github.com/hedgefundprod/stream-reduce">GitHub</a>
+        <a href="https://github.com/hedgefundprod/stream-reduce#readme">Docs</a>
+        <span>Built with FastAPI · React · yt-dlp · Whisper · Gemini</span>
+      </div>
+    </footer>
+  </body>
+</html>

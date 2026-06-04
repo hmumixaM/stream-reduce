@@ -187,9 +187,11 @@ export const api = {
     favorite?: boolean;
     archived?: boolean;
     group_id?: number;
+    ungrouped?: boolean;
     sort?: string;
     order?: string;
     limit?: number;
+    offset?: number;
   }) => {
     const sp = new URLSearchParams();
     if (params?.status) sp.set("status", params.status);
@@ -198,9 +200,11 @@ export const api = {
     if (params?.favorite !== undefined) sp.set("favorite", String(params.favorite));
     if (params?.archived !== undefined) sp.set("archived", String(params.archived));
     if (params?.group_id !== undefined) sp.set("group_id", String(params.group_id));
+    if (params?.ungrouped) sp.set("ungrouped", "true");
     if (params?.sort) sp.set("sort", params.sort);
     if (params?.order) sp.set("order", params.order);
     if (params?.limit !== undefined) sp.set("limit", String(params.limit));
+    if (params?.offset !== undefined) sp.set("offset", String(params.offset));
     const qs = sp.toString();
     return req<Item[]>(`/api/items${qs ? `?${qs}` : ""}`);
   },
