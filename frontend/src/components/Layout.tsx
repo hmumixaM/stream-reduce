@@ -3,6 +3,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
+  Search as SearchIcon,
   ListChecks,
   Rss,
   BarChart3,
@@ -17,6 +18,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "Library", icon: LayoutGrid, end: true },
+  { to: "/search", label: "Search", icon: SearchIcon },
   { to: "/queue", label: "Queue", icon: ListChecks },
   { to: "/subscriptions", label: "Subscriptions", icon: Rss },
   { to: "/stats", label: "Stats", icon: BarChart3 },

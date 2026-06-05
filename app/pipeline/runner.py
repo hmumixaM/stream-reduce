@@ -216,6 +216,9 @@ def process_item(item_id: int) -> None:
             ) as tracker:
                 summarize_item(s, item_id, tracker)
 
+        # --- Stage: embed transcript + summary for semantic search ---
+        _embed_stage(item_id)
+
         with session_scope() as s:
             item = s.get(Item, item_id)
             item.status = ItemStatus.done
@@ -296,6 +299,7 @@ def resummarize_item(item_id: int) -> None:
                 provider="litellm", model=effective_llm_model(),
             ) as tracker:
                 summarize_item(s, item_id, tracker)
+        _embed_stage(item_id)
         with session_scope() as s:
             item = s.get(Item, item_id)
             item.status = ItemStatus.done
@@ -309,6 +313,29 @@ def resummarize_item(item_id: int) -> None:
                 item.error = f"{type(exc).__name__}: {exc}"[:4000]
                 s.add(item)
         raise
+
+
+def _embed_stage(item_id: int) -> None:
+    """Run the (optional) embedding stage. Auxiliary: a failure here is logged
+    but never fails the item, which has already been transcribed + summarized."""
+    settings = get_settings()
+    if not settings.enable_embeddings:
+        return
+    from app import db
+
+    if not db.VEC_AVAILABLE:
+        return
+    try:
+        from app.pipeline.embed import embed_item
+
+        with session_scope() as s:
+            with StageTracker(
+                s, item_id, StageName.embed,
+                provider="litellm", model=settings.embedding_model,
+            ) as tracker:
+                embed_item(s, item_id, tracker)
+    except Exception:  # noqa: BLE001
+        logger.exception("embedding stage failed for item %s (non-fatal)", item_id)
 
 
 def poll_subscription(subscription_id: int) -> int:

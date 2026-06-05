@@ -95,6 +95,37 @@ def list_items(
 
 
 @mcp.tool
+def search_content(
+    query: str,
+    k: int = 10,
+    source: str | None = None,
+    item_id: int | None = None,
+) -> list[dict]:
+    """Semantic search across all transcribed + summarized content.
+
+    Embeds ``query`` and returns the most relevant chunks (not whole items), so
+    you can find and quote the exact passage. Each hit includes the chunk
+    ``text``, its ``item_id``/``title``/``source_url``, a ``source``
+    (transcript/summary) + ``field`` tag, a similarity ``score``, and — for
+    transcript hits — ``start_s`` plus a ``deep_link`` that jumps to that moment
+    in the source media. Use ``get_item`` to read the full item afterwards.
+
+    Optional filters: ``source`` ("transcript" or "summary") and ``item_id``
+    (restrict the search to one item).
+    """
+    from app.search import SearchUnavailableError, semantic_search
+
+    with session_scope() as session:
+        try:
+            hits = semantic_search(
+                session, query, k=min(max(k, 1), 50), item_id=item_id, source=source
+            )
+        except SearchUnavailableError as exc:
+            raise ValueError(str(exc)) from exc
+        return [hit.to_dict() for hit in hits]
+
+
+@mcp.tool
 def get_item(item_id: int) -> dict:
     """Get full details for one item, including the summary (markdown +
     structured TL;DR/outline/key points/quotes) and transcript availability."""

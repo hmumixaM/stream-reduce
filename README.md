@@ -19,6 +19,11 @@ summaries and keeps them in a searchable library.
   Gemini summarization (Gemini models served by a LiteLLM proxy over its
   OpenAI-compatible API). Lossless, timestamp-cited summaries that link back to
   the source.
+- **Semantic search**: every transcript and summary is chunked and embedded
+  with `text-embedding-005` (via the same LiteLLM proxy) into a `sqlite-vec`
+  index, so you can search by meaning and jump straight to the source passage —
+  from the UI, the REST API, or an AI agent. The chunk-level vectors are also
+  the foundation for a future knowledge graph that links related content.
 - **Subscriptions**: poll feeds on a schedule and auto-summarize new items.
 - **MCP**: a minimal [Model Context Protocol](https://modelcontextprotocol.io)
   server is mounted at `/mcp` so AI agents can operate the app (add content,
@@ -38,7 +43,11 @@ React SPA ──► FastAPI (REST + serves SPA) ──► SQLite
                   │                              │
                   └── APScheduler (poll feeds)   ├─ yt-dlp / iTunes API / RSS
                                                  ├─ OpenRouter Whisper (STT)
-                                                 └─ Gemini via LiteLLM (summary)
+                                                 ├─ Gemini via LiteLLM (summary)
+                                                 └─ text-embedding-005 (embed)
+                                                      │
+                                                      ▼
+                                            sqlite-vec index (semantic search)
 ```
 
 ## Configuration
@@ -58,6 +67,10 @@ cp .env.example .env
 | `STT_MODEL` | default transcription model: `openai/whisper-large-v3-turbo`, `google/chirp-3`, `openai/gpt-4o-transcribe`, ... (overridable in Settings) |
 | `TRANSCRIBE_RATE_LIMIT` | Max STT requests/minute (rate-limit guard) |
 | `TRANSCRIBE_CHUNK_SECONDS` | Audio chunk length for timestamps |
+| `ENABLE_EMBEDDINGS` | Toggle semantic-search embeddings (default `true`) |
+| `EMBEDDING_MODEL` | Embedding model on the LiteLLM proxy (default `text-embedding-005`) |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` | Override embedding endpoint/key (blank = reuse `LLM_*`) |
+| `EMBED_CHUNK_CHARS` / `EMBED_BATCH_SIZE` | Chunk size + request batch (kept small for low-RAM hosts) |
 
 The OpenRouter key is also expected in your shell (`.zshrc`) as
 `OPENROUTER_API_KEY` for local runs.
@@ -174,9 +187,10 @@ client at `http://<host>:8010/mcp/`. Tools:
 
 | Tool           | Purpose                                                            |
 | -------------- | ----------------------------------------------------------------- |
-| `add_content`  | Queue URLs (video, episode, playlist, or whole podcast show)       |
-| `list_items`   | Search the library (by title / status / platform)                 |
-| `get_item`     | Read one item's summary (markdown + structured) and metadata       |
+| `add_content`    | Queue URLs (video, episode, playlist, or whole podcast show)       |
+| `list_items`     | Filter the library by title / status / platform                    |
+| `search_content` | Semantic search across all transcripts + summaries; returns the matching chunk text, a similarity score, and a deep-link/timestamp back to the source |
+| `get_item`       | Read one item's summary (markdown + structured) and metadata       |
 
 Example Cursor/Claude config:
 
@@ -186,6 +200,38 @@ Example Cursor/Claude config:
 
 It can also run as a local stdio server: `uv run python -m app.mcp_server`. Set
 `ENABLE_MCP=false` to disable the mounted endpoint.
+
+## Semantic search & embeddings
+
+Each item's transcript and summary are split into small chunks (transcript
+windows keep their `start/end` timestamps; summaries are split by field —
+TL;DR, key points, quotes, outline, plus the rendered markdown). Every chunk is
+embedded with `text-embedding-005` through the existing LiteLLM proxy and stored
+in a `sqlite-vec` virtual table (`chunk_vec`) keyed to a `chunk` row that carries
+the original text and its locator. Vectors are unit-normalized so the index's L2
+distance ranks like cosine similarity.
+
+This is **memory-light on a NAS**: the embedding model runs remotely (no local
+model), only a small batch of vectors is ever in flight, and each 768-dim vector
+is ~3 KB on disk. The genuinely heavy stages remain transcription/decoding.
+
+- **Automatic**: a new `embed` pipeline stage runs after summarization (and on
+  re-summarize), so new content is searchable without any extra step. It is
+  idempotent — unchanged content is never re-embedded.
+- **Backfill once** for content that predates this feature:
+
+  ```bash
+  uv run python -m app.pipeline.embed_backfill        # embed items missing chunks
+  uv run python -m app.pipeline.embed_backfill --all  # force re-embed everything
+  ```
+
+- **Use it**: the **Search** page in the UI, `GET /api/search?q=...&k=...&source=transcript|summary&item_id=...`,
+  or the `search_content` MCP tool. Results link back to the exact source span.
+
+Everything is additive and backward compatible: the `chunk`/`chunk_vec` tables
+are created automatically on startup, existing items/transcripts/summaries are
+never modified, and only derived chunk rows are (re)written. Set
+`ENABLE_EMBEDDINGS=false` to turn the feature off entirely.
 
 ## How summarization stays source-traceable
 

@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "opencc-python-reimplemented>=0.1.7",
     "fastmcp>=3.4.0",
+    "sqlite-vec>=0.1.6",
 ]
 
 [project.scripts]

@@ -159,6 +159,22 @@ export interface Stats {
   http_429_total: number;
 }
 
+export interface SearchHit {
+  chunk_id: number;
+  item_id: number;
+  title?: string | null;
+  source_url: string;
+  platform: Platform;
+  author?: string | null;
+  source: "transcript" | "summary";
+  field: string;
+  text: string;
+  start_s?: number | null;
+  end_s?: number | null;
+  deep_link?: string | null;
+  score: number;
+}
+
 export interface AppSettings {
   llm_base_url: string;
   llm_model: string;
@@ -278,6 +294,15 @@ export const api = {
     req<{ ok: boolean }>(`/api/subscriptions/${id}/poll`, { method: "POST" }),
   deleteSubscription: (id: number) =>
     req<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
+
+  search: (params: { q: string; k?: number; source?: string; item_id?: number }) => {
+    const sp = new URLSearchParams();
+    sp.set("q", params.q);
+    if (params.k !== undefined) sp.set("k", String(params.k));
+    if (params.source) sp.set("source", params.source);
+    if (params.item_id !== undefined) sp.set("item_id", String(params.item_id));
+    return req<SearchHit[]>(`/api/search?${sp.toString()}`);
+  },
 
   getStats: () => req<Stats>("/api/stats"),
   getSettings: () => req<AppSettings>("/api/settings"),

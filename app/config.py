@@ -53,6 +53,20 @@ class Settings(BaseSettings):
     summary_reduce_max_tokens: int = 16000
     enable_gemini_audio_fallback: bool = False
 
+    # Embeddings: text-embedding-005 served by the same LiteLLM proxy. Vectors
+    # are stored in a sqlite-vec virtual table for semantic search over chunked
+    # transcripts + summaries. Falls back to the LLM proxy's base url / api key.
+    enable_embeddings: bool = True
+    embedding_model: str = "text-embedding-005"
+    embedding_base_url: str = ""  # empty => reuse llm_base_url
+    embedding_api_key: str = ""  # empty => reuse llm_api_key
+    embedding_dim: int = 768
+    # Target size of each embedded text chunk (characters). Small enough to keep
+    # peak memory low on constrained hosts (e.g. a low-RAM NAS).
+    embed_chunk_chars: int = 1500
+    # Max texts per embedding request; bounds in-flight memory.
+    embed_batch_size: int = 32
+
     # MCP server for AI agents (mounted at /mcp on the web app)
     enable_mcp: bool = True
 
@@ -80,6 +94,14 @@ class Settings(BaseSettings):
     @property
     def resolved_media_dir(self) -> Path:
         return self.media_dir or (self.data_dir / "media")
+
+    @property
+    def resolved_embedding_base_url(self) -> str:
+        return self.embedding_base_url or self.llm_base_url
+
+    @property
+    def resolved_embedding_api_key(self) -> str:
+        return self.embedding_api_key or self.llm_api_key
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

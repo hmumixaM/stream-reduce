@@ -43,6 +43,12 @@ class StageName(str, Enum):
     transcribe = "transcribe"
     summarize = "summarize"
     gemini_audio = "gemini_audio"
+    embed = "embed"
+
+
+class ChunkSource(str, Enum):
+    transcript = "transcript"
+    summary = "summary"
 
 
 class StageStatus(str, Enum):
@@ -155,6 +161,37 @@ class Summary(SQLModel, table=True):
     markdown: str = Field(default="", sa_column=Column(Text))
     # {"tldr": str, "key_points": [...], "outline": [...], "quotes": [...], "entities": [...]}
     structured: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class Chunk(SQLModel, table=True):
+    """A semantically-embeddable slice of an item's transcript or summary.
+
+    Vectors live in the ``chunk_vec`` sqlite-vec virtual table keyed by
+    ``rowid == chunk.id``; this row carries the text plus locators so a search
+    hit can be traced back to the exact source span (timestamp / deep-link).
+    Chunks are derived data: they are freely regenerated, never the source of
+    truth, and rebuilding them never touches transcript/summary/item rows.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    source: ChunkSource = Field(sa_column=Column(SAEnum(ChunkSource), nullable=False))
+    # Fine-grained provenance: transcript / tldr / key_point / quote / outline /
+    # markdown — lets future knowledge-graph logic weight chunks by kind.
+    field: str = ""
+    chunk_index: int = 0
+    text: str = Field(default="", sa_column=Column(Text))
+    # Transcript locators (None for summary chunks).
+    start_s: float | None = None
+    end_s: float | None = None
+    # Character offsets into the source text (None when not applicable).
+    char_start: int | None = None
+    char_end: int | None = None
+    token_count: int = 0
+    # sha256 of (normalized text + model); enables idempotent backfill/skip.
+    content_hash: str = Field(default="", index=True)
+    embedding_model: str = ""
     created_at: datetime = Field(default_factory=utcnow)
 
 

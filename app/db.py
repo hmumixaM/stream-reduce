@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -11,7 +12,13 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 _settings = get_settings()
+
+# Set False once if the sqlite-vec extension cannot be loaded, so the rest of
+# the app degrades gracefully (ingest still works; semantic search is disabled).
+VEC_AVAILABLE = False
 
 connect_args = {"check_same_thread": False} if _settings.resolved_database_url.startswith(
     "sqlite"
@@ -27,11 +34,38 @@ engine: Engine = create_engine(
 @event.listens_for(engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, _connection_record):
     # WAL improves concurrency between web + worker processes on SQLite.
-    if _settings.resolved_database_url.startswith("sqlite"):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA busy_timeout=5000")
-        cursor.close()
+    if not _settings.resolved_database_url.startswith("sqlite"):
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+    # Load sqlite-vec on every connection so both the web and worker processes
+    # can run KNN queries. The flag mirrors success/failure for callers.
+    if _settings.enable_embeddings:
+        _load_sqlite_vec(dbapi_connection)
+
+
+def _load_sqlite_vec(dbapi_connection) -> None:
+    global VEC_AVAILABLE
+    try:
+        import sqlite_vec
+
+        dbapi_connection.enable_load_extension(True)
+        sqlite_vec.load(dbapi_connection)
+        dbapi_connection.enable_load_extension(False)
+        VEC_AVAILABLE = True
+    except Exception as exc:  # noqa: BLE001 - degrade gracefully, never break ingest
+        if VEC_AVAILABLE:
+            # Was working before; surface the regression but keep serving.
+            logger.warning("sqlite-vec failed to load on a new connection: %s", exc)
+        else:
+            logger.warning(
+                "sqlite-vec unavailable (%s); semantic search disabled. "
+                "Install it (`uv sync`) and ensure your Python supports loadable "
+                "SQLite extensions.",
+                exc,
+            )
 
 
 def init_db() -> None:
@@ -39,6 +73,31 @@ def init_db() -> None:
 
     SQLModel.metadata.create_all(engine)
     _ensure_columns()
+    _ensure_vec_table()
+
+
+def _ensure_vec_table() -> None:
+    """Create the sqlite-vec virtual table that holds chunk embeddings.
+
+    Keyed by rowid == chunk.id so KNN hits join straight back to the ``chunk``
+    table. No-op (with a warning) when the extension is unavailable.
+    """
+    if not _settings.enable_embeddings:
+        return
+    if not _settings.resolved_database_url.startswith("sqlite"):
+        return
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        if not VEC_AVAILABLE:
+            return
+        dim = _settings.embedding_dim
+        conn.execute(
+            text(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec "
+                f"USING vec0(embedding float[{dim}])"
+            )
+        )
 
 
 # Columns added after the initial schema; create_all won't ALTER existing tables,
