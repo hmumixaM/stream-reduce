@@ -13,6 +13,7 @@ import {
   Sun,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,11 @@ const NAV = [
   { to: "/stats", label: "Stats", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
+
+// The public mirror is read-only: only browsing + search are reachable.
+const NAV_ITEMS = MIRROR
+  ? NAV.filter((item) => item.to === "/" || item.to === "/search")
+  : NAV;
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
@@ -88,7 +94,12 @@ export function Layout() {
   const [dark, setDark] = useState(
     () => document.documentElement.classList.contains("dark"),
   );
-  const queue = useQuery({ queryKey: ["queue"], queryFn: api.listQueue, refetchInterval: 4000 });
+  const queue = useQuery({
+    queryKey: ["queue"],
+    queryFn: api.listQueue,
+    refetchInterval: 4000,
+    enabled: !MIRROR,
+  });
   const active = (queue.data ?? []).filter((i) => i.status !== "error").length;
 
   const toggleTheme = () => {
@@ -103,11 +114,13 @@ export function Layout() {
           <img src="/logo.png" alt="" className="h-8 w-8 rounded-md" />
           <span className="text-lg font-semibold">stream-reduce</span>
         </div>
-        <Button className="mb-4 w-full" onClick={() => setAddOpen(true)}>
-          <Plus className="h-4 w-4" /> Add content
-        </Button>
+        {!MIRROR && (
+          <Button className="mb-4 w-full" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" /> Add content
+          </Button>
+        )}
         <nav className="flex flex-1 flex-col gap-1">
-          {NAV.map((item) => (
+          {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -141,7 +154,7 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
-      <AddDialog open={addOpen} onClose={() => setAddOpen(false)} />
+      {!MIRROR && <AddDialog open={addOpen} onClose={() => setAddOpen(false)} />}
     </div>
   );
 }

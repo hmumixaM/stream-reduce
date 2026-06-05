@@ -1,0 +1,35 @@
+name: Summarize request
+description: Ask for a video or podcast to be summarized and added to the public library.
+title: "Summarize: "
+labels: ["summarize-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion! Paste the link(s) you'd like summarized. The
+        maintainer reviews requests and may add them to the summarization queue —
+        once processed, the summary shows up on the public library mirror.
+  - type: textarea
+    id: urls
+    attributes:
+      label: Source URL(s)
+      description: One per line. YouTube, Bilibili, Apple Podcasts, 小宇宙, or any RSS / RSSHub feed. Playlists and whole shows are fine.
+      placeholder: |
+        https://www.youtube.com/watch?v=...
+        https://www.bilibili.com/video/BV...
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes (optional)
+      description: Anything that helps — why it's worth summarizing, language, a specific part, etc.
+    validations:
+      required: false
+  - type: checkboxes
+    id: ack
+    attributes:
+      label: Acknowledgement
+      options:
+        - label: I understand requests are reviewed and added at the maintainer's discretion (no guarantee or timeline).
+          required: true

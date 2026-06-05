@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import { ArrowLeft, Film, Pencil, Plus, Trash2 } from "lucide-react";
 import { api, type Item } from "@/lib/api";
+import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input } from "@/components/ui";
 import { PlatformBadge } from "@/components/badges";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
@@ -107,17 +108,19 @@ export function FolderView() {
             {folder?.item_count ?? members.length} items
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
-            <Plus className="h-4 w-4" /> Add items
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleRename}>
-            <Pencil className="h-4 w-4" /> Rename
-          </Button>
-          <Button variant="danger" size="sm" onClick={handleDelete}>
-            <Trash2 className="h-4 w-4" /> Delete
-          </Button>
-        </div>
+        {!MIRROR && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setAdding(true)}>
+              <Plus className="h-4 w-4" /> Add items
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleRename}>
+              <Pencil className="h-4 w-4" /> Rename
+            </Button>
+            <Button variant="danger" size="sm" onClick={handleDelete}>
+              <Trash2 className="h-4 w-4" /> Delete
+            </Button>
+          </div>
+        )}
       </div>
 
       {items.isLoading ? (
@@ -143,7 +146,7 @@ export function FolderView() {
         </>
       ) : (
         <Card className="p-10 text-center text-muted-foreground">
-          This folder is empty. Click "Add items" to fill it.
+          {MIRROR ? "This folder is empty." : 'This folder is empty. Click "Add items" to fill it.'}
         </Card>
       )}
 

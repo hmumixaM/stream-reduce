@@ -148,6 +148,43 @@ venv, app code, the built SPA, and static `ffmpeg`/`ffprobe` binaries — no Nod
 no apt, and no build toolchain. Result: ~660MB (vs ~1.2GB for a naive build with
 the full apt `ffmpeg`).
 
+## Public mirror (Cloudflare Pages)
+
+A **read-only static mirror** of the library can be published to Cloudflare
+Pages (free tier) to share summaries publicly — without exposing the NAS, any
+write actions, or the settings / queue / stats internals.
+
+The mirror reuses the same React SPA, built with `VITE_MIRROR=1`. In that mode
+the app reads pre-exported JSON under `/data` instead of the live API, hides
+every write/admin surface (add, settings, stats, queue, subscriptions, folder
+editing, favorite, archive, comments), and replaces semantic search with an
+in-browser keyword index ([`minisearch`](https://github.com/lucaong/minisearch))
+— so there is no backend, database, or secret to host.
+
+```
+NAS API (:8010 via SSH tunnel) ──► mirror/export.py ──► mirror/dist/data/*.json
+                                                              │
+            frontend (VITE_MIRROR=1 build) ──► mirror/dist ◄──┘
+                                                              │
+                                          wrangler pages deploy
+                                                              ▼
+                                   https://stream-reduce-mirror.pages.dev
+```
+
+One command syncs content and deploys (uses the local `CLOUDFLARE_ACCOUNT_ID` /
+`CLOUDFLARE_API_TOKEN`, and `NAS_PASSWORD` for the SSH tunnel):
+
+```bash
+uv run python -m mirror.sync                 # tunnel -> build -> export -> deploy
+uv run python -m mirror.sync --no-deploy     # dry run: build + export only
+uv run python -m mirror.sync --base-url http://localhost:8010 --no-tunnel
+```
+
+Re-run it any time to refresh the public copy with the latest summaries. The
+landing site at <https://hmumixam.github.io/stream-reduce/> links to the mirror
+and invites visitors to [open an issue](https://github.com/hmumixaM/stream-reduce/issues/new?template=summarize-request.yml)
+to request that a video/podcast be summarized and added to the queue.
+
 ## Local development
 
 Backend:

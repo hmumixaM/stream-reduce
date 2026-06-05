@@ -1,3 +1,5 @@
+import { MIRROR } from "@/lib/mirror";
+
 export type ItemStatus =
   | "queued"
   | "fetching"
@@ -212,20 +214,157 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export interface ListItemsParams {
+  status?: string;
+  platform?: string;
+  q?: string;
+  favorite?: boolean;
+  archived?: boolean;
+  group_id?: number;
+  ungrouped?: boolean;
+  sort?: string;
+  order?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SearchParams {
+  q: string;
+  k?: number;
+  source?: string;
+  item_id?: number;
+}
+
+// --- Mirror (static) backend ---------------------------------------------
+// In mirror mode the read endpoints are served from pre-exported JSON under
+// `/data` (see `mirror/export.py`); there is no live API. Each dataset is
+// fetched once and cached for the lifetime of the page.
+
+type SearchDoc = SearchHit & { id: number };
+
+const mirrorJson = (() => {
+  const cache = new Map<string, Promise<unknown>>();
+  return <T,>(path: string): Promise<T> => {
+    if (!cache.has(path)) {
+      cache.set(
+        path,
+        fetch(path).then((r) => {
+          if (!r.ok) throw new Error(`${r.status}: ${path}`);
+          return r.json();
+        }),
+      );
+    }
+    return cache.get(path) as Promise<T>;
+  };
+})();
+
+const SORT_KEYS: Record<string, keyof Item> = {
+  added: "created_at",
+  published: "published_at",
+  views: "view_count",
+  likes: "like_count",
+  duration: "duration_s",
+  position: "group_position",
+};
+
+function compareItems(a: Item, b: Item, sort: string, order: string): number {
+  const key = SORT_KEYS[sort] ?? "created_at";
+  const av = a[key];
+  const bv = b[key];
+  // Nulls always sort last, regardless of direction.
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  let cmp = av < bv ? -1 : av > bv ? 1 : 0;
+  if (order !== "asc") cmp = -cmp;
+  if (cmp !== 0) return cmp;
+  // Stable secondary key: most-recently-added first.
+  return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0;
+}
+
+async function mirrorListItems(params?: ListItemsParams): Promise<Item[]> {
+  const all = await mirrorJson<Item[]>("/data/items.json");
+  let items = all;
+  if (params?.platform) items = items.filter((i) => i.platform === params.platform);
+  if (params?.group_id !== undefined)
+    items = items.filter((i) => i.group_id === params.group_id);
+  if (params?.ungrouped) items = items.filter((i) => i.group_id == null);
+  if (params?.q) {
+    const needle = params.q.toLowerCase();
+    items = items.filter((i) => (i.title ?? "").toLowerCase().includes(needle));
+  }
+  items = [...items].sort((a, b) =>
+    compareItems(a, b, params?.sort ?? "added", params?.order ?? "desc"),
+  );
+  const offset = params?.offset ?? 0;
+  const limit = params?.limit ?? items.length;
+  return items.slice(offset, offset + limit);
+}
+
+let mirrorSearchIndex: Promise<{
+  search: (q: string) => Array<Record<string, unknown>>;
+}> | null = null;
+
+function loadMirrorSearchIndex() {
+  if (!mirrorSearchIndex) {
+    mirrorSearchIndex = (async () => {
+      const { default: MiniSearch } = await import("minisearch");
+      const docs = await mirrorJson<SearchDoc[]>("/data/search-index.json");
+      const ms = new MiniSearch<SearchDoc>({
+        idField: "id",
+        fields: ["text", "title"],
+        storeFields: [
+          "chunk_id",
+          "item_id",
+          "title",
+          "source_url",
+          "platform",
+          "author",
+          "source",
+          "field",
+          "text",
+          "start_s",
+          "end_s",
+          "deep_link",
+        ],
+        searchOptions: { boost: { title: 2 }, prefix: true, fuzzy: 0.2 },
+      });
+      ms.addAll(docs);
+      return ms;
+    })();
+  }
+  return mirrorSearchIndex;
+}
+
+async function mirrorSearch(params: SearchParams): Promise<SearchHit[]> {
+  const ms = await loadMirrorSearchIndex();
+  let results = ms.search(params.q);
+  if (params.source) results = results.filter((r) => r.source === params.source);
+  if (params.item_id !== undefined)
+    results = results.filter((r) => r.item_id === params.item_id);
+  const k = params.k ?? 10;
+  return results.slice(0, k).map(
+    (r): SearchHit => ({
+      chunk_id: r.chunk_id as number,
+      item_id: r.item_id as number,
+      title: (r.title as string | null) ?? null,
+      source_url: r.source_url as string,
+      platform: r.platform as Platform,
+      author: (r.author as string | null) ?? null,
+      source: r.source as "transcript" | "summary",
+      field: r.field as string,
+      text: r.text as string,
+      start_s: (r.start_s as number | null) ?? null,
+      end_s: (r.end_s as number | null) ?? null,
+      deep_link: (r.deep_link as string | null) ?? null,
+      score: r.score as number,
+    }),
+  );
+}
+
 export const api = {
-  listItems: (params?: {
-    status?: string;
-    platform?: string;
-    q?: string;
-    favorite?: boolean;
-    archived?: boolean;
-    group_id?: number;
-    ungrouped?: boolean;
-    sort?: string;
-    order?: string;
-    limit?: number;
-    offset?: number;
-  }) => {
+  listItems: (params?: ListItemsParams) => {
+    if (MIRROR) return mirrorListItems(params);
     const sp = new URLSearchParams();
     if (params?.status) sp.set("status", params.status);
     if (params?.platform) sp.set("platform", params.platform);
@@ -242,9 +381,11 @@ export const api = {
     return req<Item[]>(`/api/items${qs ? `?${qs}` : ""}`);
   },
   listGroups: (archived?: boolean) =>
-    req<Group[]>(
-      `/api/items/groups${archived !== undefined ? `?archived=${archived}` : ""}`,
-    ),
+    MIRROR
+      ? mirrorJson<Group[]>("/data/groups.json")
+      : req<Group[]>(
+          `/api/items/groups${archived !== undefined ? `?archived=${archived}` : ""}`,
+        ),
   createGroup: (title: string) =>
     req<Group>("/api/items/groups", {
       method: "POST",
@@ -262,7 +403,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ group_id: groupId }),
     }),
-  getItem: (id: number) => req<ItemDetail>(`/api/items/${id}`),
+  getItem: (id: number) =>
+    MIRROR
+      ? mirrorJson<ItemDetail>(`/data/items/${id}.json`)
+      : req<ItemDetail>(`/api/items/${id}`),
   addItems: (urls: string[]) =>
     req<Item[]>("/api/items", { method: "POST", body: JSON.stringify({ urls }) }),
   retryItem: (id: number) => req<Item>(`/api/items/${id}/retry`, { method: "POST" }),
@@ -298,7 +442,8 @@ export const api = {
   deleteSubscription: (id: number) =>
     req<void>(`/api/subscriptions/${id}`, { method: "DELETE" }),
 
-  search: (params: { q: string; k?: number; source?: string; item_id?: number }) => {
+  search: (params: SearchParams) => {
+    if (MIRROR) return mirrorSearch(params);
     const sp = new URLSearchParams();
     sp.set("q", params.q);
     if (params.k !== undefined) sp.set("k", String(params.k));
@@ -307,7 +452,8 @@ export const api = {
     return req<SearchHit[]>(`/api/search?${sp.toString()}`);
   },
 
-  getStats: () => req<Stats>("/api/stats"),
+  getStats: (refresh?: boolean) =>
+    req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),
   getSettings: () => req<AppSettings>("/api/settings"),
   updateSettings: (payload: SettingsUpdate) =>
     req<AppSettings>("/api/settings", {

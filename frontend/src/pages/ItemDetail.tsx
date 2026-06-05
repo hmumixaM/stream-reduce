@@ -15,6 +15,7 @@ import {
   Send,
 } from "lucide-react";
 import { api, type StageRun, type Comment } from "@/lib/api";
+import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import {
@@ -95,61 +96,68 @@ export function ItemDetail() {
           {d.author && <p className="mt-1 text-sm text-muted-foreground">{d.author}</p>}
         </div>
         <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => favorite.mutate()}
-            disabled={favorite.isPending}
-            title={d.is_favorite ? "Unfavorite" : "Favorite"}
-          >
-            <Star
-              className={`h-4 w-4 ${d.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
-            />
-            {d.is_favorite ? "Favorited" : "Favorite"}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => archive.mutate()}
-            disabled={archive.isPending}
-            title={d.is_archived ? "Unarchive" : "Archive"}
-          >
-            {d.is_archived ? (
-              <ArchiveRestore className="h-4 w-4" />
-            ) : (
-              <Archive className="h-4 w-4" />
-            )}
-            {d.is_archived ? "Archived" : "Archive"}
-          </Button>
+          {!MIRROR && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => favorite.mutate()}
+                disabled={favorite.isPending}
+                title={d.is_favorite ? "Unfavorite" : "Favorite"}
+              >
+                <Star
+                  className={`h-4 w-4 ${d.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
+                />
+                {d.is_favorite ? "Favorited" : "Favorite"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => archive.mutate()}
+                disabled={archive.isPending}
+                title={d.is_archived ? "Unarchive" : "Archive"}
+              >
+                {d.is_archived ? (
+                  <ArchiveRestore className="h-4 w-4" />
+                ) : (
+                  <Archive className="h-4 w-4" />
+                )}
+                {d.is_archived ? "Archived" : "Archive"}
+              </Button>
+            </>
+          )}
           <a href={d.source_url} target="_blank" rel="noreferrer">
             <Button variant="outline" size="sm">
               <ExternalLink className="h-4 w-4" /> Source
             </Button>
           </a>
-          {d.status === "error" ? (
-            <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>
-              <RefreshCw className="h-4 w-4" /> Retry
+          {!MIRROR &&
+            (d.status === "error" ? (
+              <Button size="sm" onClick={() => retry.mutate()} disabled={retry.isPending}>
+                <RefreshCw className="h-4 w-4" /> Retry
+              </Button>
+            ) : (
+              (() => {
+                const processing =
+                  regenerate.isPending || !["done", "error"].includes(d.status);
+                return (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => regenerate.mutate()}
+                    disabled={processing}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${processing ? "animate-spin" : ""}`} />
+                    {processing ? "Regenerating…" : "Regenerate"}
+                  </Button>
+                );
+              })()
+            ))}
+          {!MIRROR && (
+            <Button variant="danger" size="sm" onClick={() => remove.mutate()}>
+              <Trash2 className="h-4 w-4" />
             </Button>
-          ) : (
-            (() => {
-              const processing =
-                regenerate.isPending || !["done", "error"].includes(d.status);
-              return (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => regenerate.mutate()}
-                  disabled={processing}
-                >
-                  <RefreshCw className={`h-4 w-4 ${processing ? "animate-spin" : ""}`} />
-                  {processing ? "Regenerating…" : "Regenerate"}
-                </Button>
-              );
-            })()
           )}
-          <Button variant="danger" size="sm" onClick={() => remove.mutate()}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
@@ -211,7 +219,7 @@ export function ItemDetail() {
             </Card>
           )}
 
-          <CommentsSection itemId={itemId} comments={d.comments} />
+          {!MIRROR && <CommentsSection itemId={itemId} comments={d.comments} />}
         </div>
 
         <div className="space-y-4">
@@ -232,13 +240,15 @@ export function ItemDetail() {
             onDeleteMedia={() => deleteMedia.mutate()}
             deletingMedia={deleteMedia.isPending}
           />
-          <ProcessingPanel
-            stages={d.stages}
-            totalMs={d.total_processing_ms}
-            totalCost={d.total_cost_usd}
-            totalReq={d.total_api_requests}
-            totalTokens={d.total_tokens}
-          />
+          {!MIRROR && (
+            <ProcessingPanel
+              stages={d.stages}
+              totalMs={d.total_processing_ms}
+              totalCost={d.total_cost_usd}
+              totalReq={d.total_api_requests}
+              totalTokens={d.total_tokens}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -338,7 +348,7 @@ function MediaPanel({
 
   return (
     <Card className="p-4">
-      <h2 className="mb-3 text-sm font-semibold">Media & coverage</h2>
+      <h2 className="mb-3 text-sm font-semibold">{MIRROR ? "Media" : "Media & coverage"}</h2>
       <div className="space-y-2 text-sm">
         {publishedAt && <MediaRow label="Published" value={formatDate(publishedAt)} />}
         {viewCount != null && <MediaRow label="Views" value={formatCount(viewCount)} />}
@@ -347,61 +357,65 @@ function MediaPanel({
           <MediaRow label="Dislikes" value={formatCount(dislikeCount)} />
         )}
         <MediaRow label="Source length" value={formatDuration(videoDuration) || "—"} />
-        <MediaRow label="File size" value={formatBytes(mediaBytes)} />
-        <MediaRow
-          label="Downloaded audio"
-          value={
-            audioDuration ? (
-              <Coverage
-                text={`${formatDuration(audioDuration)}${audioPct !== null ? ` (${audioPct}%)` : ""}`}
-                ok={ok(audioPct)}
-              />
-            ) : (
-              "native transcript"
-            )
-          }
-        />
-        <MediaRow
-          label="Transcript coverage"
-          value={
-            transcriptEnd ? (
-              <Coverage
-                text={`${formatDuration(transcriptEnd)}${covPct !== null ? ` (${covPct}%)` : ""}`}
-                ok={ok(covPct)}
-              />
-            ) : (
-              "—"
-            )
-          }
-        />
-        <MediaRow
-          label="Downloaded file"
-          value={
-            mediaPath ? (
-              <span className="flex items-center gap-2">
-                <a
-                  href={`/media/${mediaPath}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="truncate text-primary hover:underline"
-                  title={mediaPath}
-                >
-                  {mediaPath.split("/").pop()}
-                </a>
-                <button
-                  onClick={onDeleteMedia}
-                  disabled={deletingMedia}
-                  title="Delete the downloaded file (a retry will re-download it)"
-                  className="shrink-0 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </span>
-            ) : (
-              "—"
-            )
-          }
-        />
+        {!MIRROR && (
+          <>
+            <MediaRow label="File size" value={formatBytes(mediaBytes)} />
+            <MediaRow
+              label="Downloaded audio"
+              value={
+                audioDuration ? (
+                  <Coverage
+                    text={`${formatDuration(audioDuration)}${audioPct !== null ? ` (${audioPct}%)` : ""}`}
+                    ok={ok(audioPct)}
+                  />
+                ) : (
+                  "native transcript"
+                )
+              }
+            />
+            <MediaRow
+              label="Transcript coverage"
+              value={
+                transcriptEnd ? (
+                  <Coverage
+                    text={`${formatDuration(transcriptEnd)}${covPct !== null ? ` (${covPct}%)` : ""}`}
+                    ok={ok(covPct)}
+                  />
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <MediaRow
+              label="Downloaded file"
+              value={
+                mediaPath ? (
+                  <span className="flex items-center gap-2">
+                    <a
+                      href={`/media/${mediaPath}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-primary hover:underline"
+                      title={mediaPath}
+                    >
+                      {mediaPath.split("/").pop()}
+                    </a>
+                    <button
+                      onClick={onDeleteMedia}
+                      disabled={deletingMedia}
+                      title="Delete the downloaded file (a retry will re-download it)"
+                      className="shrink-0 rounded-md border border-border p-1 text-muted-foreground transition-colors hover:border-red-500 hover:text-red-400 disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ) : (
+                  "—"
+                )
+              }
+            />
+          </>
+        )}
       </div>
     </Card>
   );

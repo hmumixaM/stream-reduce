@@ -11,26 +11,35 @@ import { Queue } from "@/pages/Queue";
 import { Subscriptions } from "@/pages/Subscriptions";
 import { Stats } from "@/pages/Stats";
 import { Settings } from "@/pages/Settings";
+import { MIRROR } from "@/lib/mirror";
 import "./index.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
+// The public mirror only exposes read-only browsing + search; the live app
+// additionally exposes the queue, subscriptions, stats, and settings.
+const children = [
+  { index: true, element: <Library /> },
+  { path: "search", element: <Search /> },
+  { path: "folders/:id", element: <FolderView /> },
+  { path: "items/:id", element: <ItemDetail /> },
+  ...(MIRROR
+    ? []
+    : [
+        { path: "queue", element: <Queue /> },
+        { path: "subscriptions", element: <Subscriptions /> },
+        { path: "stats", element: <Stats /> },
+        { path: "settings", element: <Settings /> },
+      ]),
+];
+
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
-    children: [
-      { index: true, element: <Library /> },
-      { path: "search", element: <Search /> },
-      { path: "folders/:id", element: <FolderView /> },
-      { path: "items/:id", element: <ItemDetail /> },
-      { path: "queue", element: <Queue /> },
-      { path: "subscriptions", element: <Subscriptions /> },
-      { path: "stats", element: <Stats /> },
-      { path: "settings", element: <Settings /> },
-    ],
+    children,
   },
 ]);
 

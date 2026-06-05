@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { FolderPlus } from "lucide-react";
 import { api } from "@/lib/api";
+import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input, Select } from "@/components/ui";
 import { ItemCard, type ItemCardActions } from "@/components/ItemCard";
 import { FolderSection, UnfiledSection } from "@/components/FolderSection";
@@ -123,9 +124,11 @@ export function Library() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleNewFolder}>
-            <FolderPlus className="h-4 w-4" /> New folder
-          </Button>
+          {!MIRROR && (
+            <Button variant="outline" size="sm" onClick={handleNewFolder}>
+              <FolderPlus className="h-4 w-4" /> New folder
+            </Button>
+          )}
           <Select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
@@ -147,19 +150,21 @@ export function Library() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <FilterChip label="All" active={view === "all"} onClick={() => setView("all")} />
-        <FilterChip
-          label="★ Favorites"
-          active={view === "favorites"}
-          onClick={() => setView("favorites")}
-        />
-        <FilterChip
-          label="Archived"
-          active={view === "archived"}
-          onClick={() => setView("archived")}
-        />
-      </div>
+      {!MIRROR && (
+        <div className="mb-4 flex flex-wrap gap-2">
+          <FilterChip label="All" active={view === "all"} onClick={() => setView("all")} />
+          <FilterChip
+            label="★ Favorites"
+            active={view === "favorites"}
+            onClick={() => setView("favorites")}
+          />
+          <FilterChip
+            label="Archived"
+            active={view === "archived"}
+            onClick={() => setView("archived")}
+          />
+        </div>
+      )}
 
       <div className="mb-5 flex flex-wrap gap-2">
         <FilterChip label="All" active={!platform} onClick={() => setPlatform("")} />
@@ -208,7 +213,11 @@ export function Library() {
         </>
       ) : (
         <Card className="p-10 text-center text-muted-foreground">
-          {filtering ? "No matching items." : "No summaries yet. Click \"Add content\" to get started."}
+          {filtering
+            ? "No matching items."
+            : MIRROR
+              ? "No summaries yet."
+              : 'No summaries yet. Click "Add content" to get started.'}
         </Card>
       )}
     </div>

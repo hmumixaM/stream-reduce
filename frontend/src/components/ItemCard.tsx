@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import type { Group, Item } from "@/lib/api";
+import { MIRROR } from "@/lib/mirror";
 import { Card } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { formatCost, formatCount, formatDate, formatMs, timeAgo } from "@/lib/utils";
@@ -32,36 +33,42 @@ export function ItemCard({ item, ...actions }: { item: Item } & ItemCardActions)
   return (
     <Link
       to={`/items/${item.id}`}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/plain", String(item.id));
-        e.dataTransfer.effectAllowed = "move";
-      }}
-      className="cursor-grab active:cursor-grabbing"
+      draggable={!MIRROR}
+      onDragStart={
+        MIRROR
+          ? undefined
+          : (e) => {
+              e.dataTransfer.setData("text/plain", String(item.id));
+              e.dataTransfer.effectAllowed = "move";
+            }
+      }
+      className={MIRROR ? undefined : "cursor-grab active:cursor-grabbing"}
     >
       <Card className="group relative h-full overflow-hidden transition-colors hover:border-primary">
-        <div className="absolute right-2 top-2 z-10 flex gap-1">
-          <FolderMenu item={item} {...actions} />
-          <CardAction
-            title={item.is_favorite ? "Unfavorite" : "Favorite"}
-            active={item.is_favorite}
-            onClick={() => actions.onFavorite(item.id)}
-          >
-            <Star
-              className={`h-4 w-4 ${item.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
-            />
-          </CardAction>
-          <CardAction
-            title={item.is_archived ? "Unarchive" : "Archive"}
-            onClick={() => actions.onArchive(item.id)}
-          >
-            {item.is_archived ? (
-              <ArchiveRestore className="h-4 w-4" />
-            ) : (
-              <Archive className="h-4 w-4" />
-            )}
-          </CardAction>
-        </div>
+        {!MIRROR && (
+          <div className="absolute right-2 top-2 z-10 flex gap-1">
+            <FolderMenu item={item} {...actions} />
+            <CardAction
+              title={item.is_favorite ? "Unfavorite" : "Favorite"}
+              active={item.is_favorite}
+              onClick={() => actions.onFavorite(item.id)}
+            >
+              <Star
+                className={`h-4 w-4 ${item.is_favorite ? "fill-amber-400 text-amber-400" : ""}`}
+              />
+            </CardAction>
+            <CardAction
+              title={item.is_archived ? "Unarchive" : "Archive"}
+              onClick={() => actions.onArchive(item.id)}
+            >
+              {item.is_archived ? (
+                <ArchiveRestore className="h-4 w-4" />
+              ) : (
+                <Archive className="h-4 w-4" />
+              )}
+            </CardAction>
+          </div>
+        )}
         <div className="aspect-video w-full overflow-hidden bg-muted">
           {item.thumbnail ? (
             <img
@@ -107,16 +114,18 @@ export function ItemCard({ item, ...actions }: { item: Item } & ItemCardActions)
               </span>
             )}
           </div>
-          <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatMs(item.total_processing_ms)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Coins className="h-3 w-3" />
-              {formatCost(item.total_cost_usd)}
-            </span>
-          </div>
+          {!MIRROR && (
+            <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {formatMs(item.total_processing_ms)}
+              </span>
+              <span className="flex items-center gap-1">
+                <Coins className="h-3 w-3" />
+                {formatCost(item.total_cost_usd)}
+              </span>
+            </div>
+          )}
         </div>
       </Card>
     </Link>
