@@ -56,24 +56,31 @@ def backfill(force: bool = False) -> dict:
 
     processed = 0
     skipped = 0
+    failed = 0
     total_chunks = 0
     for item_id in item_ids:
-        with session_scope() as session:
-            if not force and _already_embedded(session, item_id):
-                skipped += 1
-                continue
-            with StageTracker(
-                session, item_id, StageName.embed,
-                provider="litellm", model=settings.embedding_model,
-            ) as tracker:
-                total_chunks += embed_item(session, item_id, tracker)
-            processed += 1
-            logger.info("backfilled item %s (%d/%d)", item_id, processed, len(item_ids))
+        try:
+            with session_scope() as session:
+                if not force and _already_embedded(session, item_id):
+                    skipped += 1
+                    continue
+                with StageTracker(
+                    session, item_id, StageName.embed,
+                    provider="litellm", model=settings.embedding_model,
+                ) as tracker:
+                    total_chunks += embed_item(session, item_id, tracker)
+                processed += 1
+                logger.info("backfilled item %s (%d/%d)", item_id, processed, len(item_ids))
+        except Exception:  # noqa: BLE001 - one bad item must not abort the whole run
+            failed += 1
+            # Item's chunks were rolled back, so a later re-run retries it.
+            logger.exception("backfill failed for item %s; continuing", item_id)
 
     result = {
         "items_total": len(item_ids),
         "items_embedded": processed,
         "items_skipped": skipped,
+        "items_failed": failed,
         "chunks_written": total_chunks,
     }
     logger.info("backfill complete: %s", result)
@@ -93,6 +100,7 @@ def main() -> None:
         f"Embedded {result['items_embedded']} item(s) "
         f"({result['chunks_written']} chunks); "
         f"skipped {result['items_skipped']} already-embedded; "
+        f"failed {result['items_failed']}; "
         f"{result['items_total']} item(s) with content total."
     )
 

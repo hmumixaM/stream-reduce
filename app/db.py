@@ -38,7 +38,11 @@ def _set_sqlite_pragma(dbapi_connection, _connection_record):
         return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA busy_timeout=5000")
+    # Generous busy timeout: the web, the RQ worker, and one-off jobs (e.g. the
+    # embedding backfill) all write to the same SQLite file. WAL allows a single
+    # writer, so a second writer must wait out the first; 30s comfortably rides
+    # over the short write bursts instead of raising "database is locked".
+    cursor.execute("PRAGMA busy_timeout=30000")
     cursor.close()
     # Load sqlite-vec on every connection so both the web and worker processes
     # can run KNN queries. The flag mirrors success/failure for callers.
