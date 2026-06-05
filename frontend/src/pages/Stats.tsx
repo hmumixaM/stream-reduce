@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -17,18 +17,29 @@ import {
   FileText,
   LayoutGrid,
   Mic,
+  RefreshCw,
   Sparkles,
   Type,
 } from "lucide-react";
 import { api, type Platform } from "@/lib/api";
-import { Card } from "@/components/ui";
+import { Button, Card, Spinner } from "@/components/ui";
 import { PlatformBadge } from "@/components/badges";
 import { formatCost, formatCount, formatLength, formatMs } from "@/lib/utils";
 
 const COLORS = ["#818cf8", "#f87171", "#34d399", "#fbbf24", "#f472b6", "#60a5fa"];
 
 export function Stats() {
-  const stats = useQuery({ queryKey: ["stats"], queryFn: api.getStats, refetchInterval: 10000 });
+  const qc = useQueryClient();
+  // Served from a short-lived server cache, so the periodic poll is cheap.
+  const stats = useQuery({
+    queryKey: ["stats"],
+    queryFn: () => api.getStats(),
+    refetchInterval: 30000,
+  });
+  const refresh = useMutation({
+    mutationFn: () => api.getStats(true),
+    onSuccess: (data) => qc.setQueryData(["stats"], data),
+  });
   if (!stats.data) return <p className="text-muted-foreground">Loading...</p>;
   const s = stats.data;
 
@@ -41,7 +52,19 @@ export function Stats() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold">Stats</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Stats</h1>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending}
+          title="Recompute now (stats are cached for ~1 min)"
+        >
+          {refresh.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />}
+          Refresh
+        </Button>
+      </div>
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <Stat icon={LayoutGrid} label="Items" value={formatCount(s.total_items)} sub={`${done} done`} />

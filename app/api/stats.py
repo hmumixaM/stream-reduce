@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends
@@ -18,9 +19,27 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 # one word. A pragmatic word count for mixed Chinese/English transcripts.
 _WORD_RE = re.compile(r"[\u4e00-\u9fff]|[0-9A-Za-z]+")
 
+# Computing stats scans every transcript's full text (millions of chars), so it
+# is far too expensive to run on every page load / poll. Cache the result in
+# memory for a short window; the dashboard is an overview, not a live feed.
+# Clients can force a recompute with `?refresh=true`.
+_STATS_TTL_SECONDS = 60
+_stats_cache: dict[str, object] = {"value": None, "expires_at": 0.0}
+
 
 @router.get("", response_model=StatsRead)
-def get_stats(session: Session = Depends(get_session)) -> StatsRead:
+def get_stats(refresh: bool = False, session: Session = Depends(get_session)) -> StatsRead:
+    now = time.monotonic()
+    cached = _stats_cache["value"]
+    if not refresh and cached is not None and now < float(_stats_cache["expires_at"]):
+        return cached  # type: ignore[return-value]
+    stats = _compute_stats(session)
+    _stats_cache["value"] = stats
+    _stats_cache["expires_at"] = now + _STATS_TTL_SECONDS
+    return stats
+
+
+def _compute_stats(session: Session) -> StatsRead:
     total_items = session.exec(select(func.count()).select_from(Item)).one()
 
     by_status: dict[str, int] = defaultdict(int)
