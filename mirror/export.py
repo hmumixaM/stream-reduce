@@ -31,6 +31,8 @@ import httpx
 # indirection lets the bundle be built either over plain HTTP (a reachable API)
 # or by running `curl` on the NAS over SSH (when TCP forwarding is disabled).
 FetchJson = Callable[[str, dict[str, Any] | None], Any]
+# Fetches a raw asset (e.g. a thumbnail) for a path, or None if it is missing.
+FetchBytes = Callable[[str], bytes | None]
 
 PAGE_SIZE = 500
 # Transcript passages are windowed to roughly this many characters so keyword
@@ -48,14 +50,18 @@ _ZERO_FIELDS = (
 )
 
 
-def http_fetcher(base_url: str) -> FetchJson:
-    """A ``FetchJson`` backed by httpx against a reachable API base URL."""
+def http_fetchers(base_url: str) -> tuple[FetchJson, FetchBytes]:
+    """JSON + bytes fetchers backed by httpx against a reachable API base URL."""
     client = httpx.Client(base_url=base_url.rstrip("/"), timeout=60)
 
     def fetch(path: str, params: dict[str, Any] | None = None) -> Any:
         return client.get(path, params=params or {}).raise_for_status().json()
 
-    return fetch
+    def fetch_bytes(path: str) -> bytes | None:
+        resp = client.get(path)
+        return resp.content if resp.status_code == 200 else None
+
+    return fetch, fetch_bytes
 
 
 def _slim_item(item: dict[str, Any]) -> dict[str, Any]:
@@ -203,7 +209,28 @@ def _slim_detail(detail: dict[str, Any]) -> dict[str, Any]:
     return slim
 
 
-def export(fetch: FetchJson, out_dir: Path) -> dict[str, Any]:
+def _export_thumbnails(
+    items: list[dict[str, Any]], fetch_bytes: FetchBytes, out_dir: Path
+) -> int:
+    """Download locally-hosted thumbnails so the mirror's ``/media/...`` <img>
+    paths resolve. External (http) thumbnails are left as-is."""
+    downloaded = 0
+    for item in items:
+        thumb = item.get("thumbnail")
+        if not thumb or not thumb.startswith("/media/"):
+            continue
+        data = fetch_bytes(thumb)
+        if data is None:
+            print(f"  warn: thumbnail missing for item {item['id']}: {thumb}")
+            continue
+        dest = out_dir / thumb.lstrip("/")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+        downloaded += 1
+    return downloaded
+
+
+def export(fetch: FetchJson, fetch_bytes: FetchBytes, out_dir: Path) -> dict[str, Any]:
     data_dir = out_dir / "data"
     items_dir = data_dir / "items"
     items_dir.mkdir(parents=True, exist_ok=True)
@@ -223,6 +250,8 @@ def export(fetch: FetchJson, out_dir: Path) -> dict[str, Any]:
         search_docs.extend(_transcript_docs(detail, next_id))
         search_docs.extend(_summary_docs(detail, next_id))
 
+    thumbnails = _export_thumbnails(items, fetch_bytes, out_dir)
+
     (data_dir / "items.json").write_text(json.dumps(slim_items, ensure_ascii=False))
     (data_dir / "groups.json").write_text(json.dumps(groups, ensure_ascii=False))
     (data_dir / "search-index.json").write_text(json.dumps(search_docs, ensure_ascii=False))
@@ -230,6 +259,7 @@ def export(fetch: FetchJson, out_dir: Path) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat(),
         "item_count": len(slim_items),
         "search_docs": len(search_docs),
+        "thumbnails": thumbnails,
     }
     (data_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False))
     return meta
@@ -272,10 +302,11 @@ def main() -> None:
         help="Output directory; data is written under <out>/data (default: %(default)s).",
     )
     args = parser.parse_args()
-    meta = export(http_fetcher(args.base_url), args.out)
+    fetch, fetch_bytes = http_fetchers(args.base_url)
+    meta = export(fetch, fetch_bytes, args.out)
     print(
-        f"Exported {meta['item_count']} items, "
-        f"{meta['search_docs']} search docs -> {args.out / 'data'}"
+        f"Exported {meta['item_count']} items, {meta['search_docs']} search docs, "
+        f"{meta['thumbnails']} thumbnails -> {args.out / 'data'}"
     )
 
 

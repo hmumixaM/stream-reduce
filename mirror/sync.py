@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-from mirror.export import FetchJson, export, http_fetcher
+from mirror.export import FetchBytes, FetchJson, export, http_fetchers
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = REPO_ROOT / "frontend"
@@ -35,8 +35,8 @@ NAS_API = "http://localhost:8010"
 SPA_REDIRECT = "/*    /index.html    200\n"
 
 
-def ssh_fetcher(host: str) -> FetchJson:
-    """A ``FetchJson`` that runs ``curl`` against the NAS API over SSH.
+def ssh_fetchers(host: str) -> tuple[FetchJson, FetchBytes]:
+    """JSON + bytes fetchers that run ``curl`` against the NAS API over SSH.
 
     The NAS sshd has TCP forwarding disabled, so a tunnel is not an option; we
     instead execute curl remotely and read its stdout. Auth uses ``NAS_PASSWORD``
@@ -50,12 +50,9 @@ def ssh_fetcher(host: str) -> FetchJson:
             "or pass --base-url for a reachable API."
         )
 
-    def fetch(path: str, params: dict[str, Any] | None = None) -> Any:
-        url = NAS_API + path
-        if params:
-            url += "?" + urlencode(params)
-        remote = f"curl -s --fail-with-body {shlex.quote(url)}"
-        proc = subprocess.run(
+    def run(url: str, *, text: bool) -> subprocess.CompletedProcess:
+        remote = f"curl -s --fail {shlex.quote(url)}"
+        return subprocess.run(
             [
                 "sshpass",
                 "-p",
@@ -67,14 +64,24 @@ def ssh_fetcher(host: str) -> FetchJson:
                 remote,
             ],
             capture_output=True,
-            text=True,
+            text=text,
         )
+
+    def fetch(path: str, params: dict[str, Any] | None = None) -> Any:
+        url = NAS_API + path
+        if params:
+            url += "?" + urlencode(params)
+        proc = run(url, text=True)
         if proc.returncode != 0:
             detail = proc.stderr.strip() or proc.stdout.strip()
             raise SystemExit(f"SSH curl failed for {path}: {detail}")
         return json.loads(proc.stdout)
 
-    return fetch
+    def fetch_bytes(path: str) -> bytes | None:
+        proc = run(NAS_API + path, text=False)
+        return proc.stdout if proc.returncode == 0 else None
+
+    return fetch, fetch_bytes
 
 
 def build_spa() -> None:
@@ -152,18 +159,21 @@ def main() -> None:
 
     if args.base_url:
         print(f"Using API at {args.base_url} (HTTP)...")
-        fetch = http_fetcher(args.base_url)
+        fetch, fetch_bytes = http_fetchers(args.base_url)
     else:
         print(f"Using NAS API via SSH curl on {args.nas_host}...")
-        fetch = ssh_fetcher(args.nas_host)
+        fetch, fetch_bytes = ssh_fetchers(args.nas_host)
     fetch("/api/health", None)  # fail fast if the source API is unreachable
 
     if not args.no_build:
         build_spa()
     DIST_DIR.mkdir(parents=True, exist_ok=True)
 
-    meta = export(fetch, DIST_DIR)
-    print(f"Exported {meta['item_count']} items, {meta['search_docs']} search docs.")
+    meta = export(fetch, fetch_bytes, DIST_DIR)
+    print(
+        f"Exported {meta['item_count']} items, {meta['search_docs']} search docs, "
+        f"{meta['thumbnails']} thumbnails."
+    )
     write_redirects()
 
     if args.no_deploy:
