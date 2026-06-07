@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import items, queue, search, settings, stats, subscriptions
+from app.api import graph, items, queue, search, settings, stats, subscriptions
 from app.config import PROJECT_ROOT, get_settings
 from app.db import init_db
 from app.mcp_server import build_mcp_app
@@ -48,6 +48,7 @@ app.include_router(subscriptions.router)
 app.include_router(stats.router)
 app.include_router(settings.router)
 app.include_router(search.router)
+app.include_router(graph.router)
 
 # Mount the MCP server before the SPA catch-all so /mcp routes correctly.
 if mcp_app is not None:

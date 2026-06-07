@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +14,11 @@ import { Settings } from "@/pages/Settings";
 import { MIRROR } from "@/lib/mirror";
 import "./index.css";
 
+// The graph page pulls in the heavy force-graph/d3 bundle, so load it on demand.
+const Graph = lazy(() =>
+  import("@/pages/Graph").then((m) => ({ default: m.Graph })),
+);
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
@@ -23,6 +28,14 @@ const queryClient = new QueryClient({
 const children = [
   { index: true, element: <Library /> },
   { path: "search", element: <Search /> },
+  {
+    path: "graph",
+    element: (
+      <Suspense fallback={<p className="text-muted-foreground">Loading graph…</p>}>
+        <Graph />
+      </Suspense>
+    ),
+  },
   { path: "folders/:id", element: <FolderView /> },
   { path: "items/:id", element: <ItemDetail /> },
   ...(MIRROR

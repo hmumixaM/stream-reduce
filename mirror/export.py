@@ -10,6 +10,8 @@ tunnel) and writes, under ``<out_dir>/data``:
                            with stages / comments / media internals dropped.
 - ``search-index.json`` -> flat passage docs (transcript windows + summary
                            fields) for the client-side keyword index.
+- ``graph.json``        -> the unified topic-cluster knowledge graph (nodes with
+                           their full member lists embedded + inter-topic edges).
 - ``meta.json``         -> ``{generated_at, item_count}``.
 
 The mirror is read-only and keyword-searched in the browser, so no embeddings,
@@ -209,6 +211,26 @@ def _slim_detail(detail: dict[str, Any]) -> dict[str, Any]:
     return slim
 
 
+def _fetch_graph(fetch: FetchJson) -> dict[str, Any]:
+    """The unified graph with each node's full member list embedded (the mirror
+    has no live API for the panel's lazy 'show all')."""
+    graph = fetch("/api/graph", None) or {}
+    for node in graph.get("nodes", []):
+        members: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page = fetch(
+                f"/api/graph/clusters/{node['id']}/items",
+                {"offset": offset, "limit": PAGE_SIZE},
+            )
+            members.extend(page)
+            if len(page) < PAGE_SIZE:
+                break
+            offset += PAGE_SIZE
+        node["items"] = members
+    return graph
+
+
 def _export_thumbnails(
     items: list[dict[str, Any]], fetch_bytes: FetchBytes, out_dir: Path
 ) -> int:
@@ -244,22 +266,29 @@ def export(fetch: FetchJson, fetch_bytes: FetchBytes, out_dir: Path) -> dict[str
     for item in items:
         detail = fetch(f"/api/items/{item['id']}", None)
         slim_items.append(_slim_item(item))
+        slim_detail = _slim_detail(detail)
+        # Embed related-article recommendations so the mirror's bottom-of-page
+        # grid works without a live API.
+        slim_detail["related"] = fetch(f"/api/items/{item['id']}/related", None) or []
         (items_dir / f"{item['id']}.json").write_text(
-            json.dumps(_slim_detail(detail), ensure_ascii=False)
+            json.dumps(slim_detail, ensure_ascii=False)
         )
         search_docs.extend(_transcript_docs(detail, next_id))
         search_docs.extend(_summary_docs(detail, next_id))
 
     thumbnails = _export_thumbnails(items, fetch_bytes, out_dir)
+    graph = _fetch_graph(fetch)
 
     (data_dir / "items.json").write_text(json.dumps(slim_items, ensure_ascii=False))
     (data_dir / "groups.json").write_text(json.dumps(groups, ensure_ascii=False))
     (data_dir / "search-index.json").write_text(json.dumps(search_docs, ensure_ascii=False))
+    (data_dir / "graph.json").write_text(json.dumps(graph, ensure_ascii=False))
     meta = {
         "generated_at": datetime.now(UTC).isoformat(),
         "item_count": len(slim_items),
         "search_docs": len(search_docs),
         "thumbnails": thumbnails,
+        "graph_topics": len(graph.get("nodes", [])),
     }
     (data_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False))
     return meta
@@ -306,7 +335,8 @@ def main() -> None:
     meta = export(fetch, fetch_bytes, args.out)
     print(
         f"Exported {meta['item_count']} items, {meta['search_docs']} search docs, "
-        f"{meta['thumbnails']} thumbnails -> {args.out / 'data'}"
+        f"{meta['graph_topics']} graph topics, {meta['thumbnails']} thumbnails "
+        f"-> {args.out / 'data'}"
     )
 
 

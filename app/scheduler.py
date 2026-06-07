@@ -8,9 +8,10 @@ from datetime import UTC
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlmodel import select
 
+from app.config import get_settings
 from app.db import session_scope
 from app.models import Subscription
-from app.queue import enqueue_poll
+from app.queue import enqueue_graph_build, enqueue_poll
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +42,27 @@ def _tick() -> None:
             logger.exception("failed to enqueue poll for subscription %s", sub_id)
 
 
+def _graph_tick() -> None:
+    """Enqueue a nightly knowledge-graph rebuild (the job itself skips when the
+    chunk fingerprint is unchanged, so this is cheap to fire periodically)."""
+    try:
+        enqueue_graph_build(force=False)
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to enqueue graph build")
+
+
 def start_scheduler() -> BackgroundScheduler:
     global _scheduler
     if _scheduler is not None:
         return _scheduler
+    settings = get_settings()
     scheduler = BackgroundScheduler(timezone="UTC")
     scheduler.add_job(_tick, "interval", seconds=TICK_SECONDS, id="poll_subscriptions",
                       next_run_time=None, max_instances=1, coalesce=True)
+    if settings.enable_graph and settings.enable_embeddings:
+        hours = max(1, settings.graph_rebuild_hours)
+        scheduler.add_job(_graph_tick, "interval", hours=hours, id="graph_build",
+                          next_run_time=None, max_instances=1, coalesce=True)
     scheduler.start()
     _scheduler = scheduler
     logger.info("subscription scheduler started (tick=%ss)", TICK_SECONDS)

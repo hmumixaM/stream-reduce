@@ -107,6 +107,9 @@ export interface ItemDetail extends Item {
   transcript?: Transcript | null;
   stages: StageRun[];
   comments: Comment[];
+  // Only present in the static mirror bundle (related articles embedded so the
+  // recommendation grid works without a live API).
+  related?: RelatedItem[];
 }
 
 export interface Group {
@@ -175,6 +178,50 @@ export interface SearchHit {
   end_s?: number | null;
   deep_link?: string | null;
   score: number;
+}
+
+export interface GraphItemBrief {
+  id: number;
+  item_id: number;
+  title?: string | null;
+  platform: Platform;
+  author?: string | null;
+  thumbnail?: string | null;
+  source_url: string;
+  weight: number;
+  chunk_count: number;
+  score?: number;
+}
+
+export interface GraphNode {
+  id: number;
+  label: string;
+  keywords: string[];
+  size: number;
+  item_count: number;
+  items: GraphItemBrief[];
+}
+
+export interface GraphEdge {
+  source: number;
+  target: number;
+  weight: number;
+}
+
+export interface GraphData {
+  build_id: number;
+  built_at: string | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export type RelatedItem = GraphItemBrief & { score: number };
+
+export interface GraphFilters {
+  archived?: boolean;
+  favorite?: boolean;
+  folders?: number[];
+  platform?: string;
 }
 
 export interface AppSettings {
@@ -362,6 +409,37 @@ async function mirrorSearch(params: SearchParams): Promise<SearchHit[]> {
   );
 }
 
+// In mirror mode the graph is unified (filters are ignored) and the full member
+// list is embedded in each node, so "show all" + related read straight from the
+// pre-exported JSON with no live API.
+async function mirrorGraph(): Promise<GraphData> {
+  return mirrorJson<GraphData>("/data/graph.json");
+}
+
+async function mirrorClusterItems(
+  clusterId: number,
+  offset: number,
+): Promise<GraphItemBrief[]> {
+  const graph = await mirrorGraph();
+  const node = graph.nodes.find((n) => n.id === clusterId);
+  return (node?.items ?? []).slice(offset);
+}
+
+async function mirrorRelated(itemId: number): Promise<RelatedItem[]> {
+  const detail = await mirrorJson<ItemDetail>(`/data/items/${itemId}.json`);
+  return detail.related ?? [];
+}
+
+function graphFilterParams(filters?: GraphFilters): string {
+  const sp = new URLSearchParams();
+  if (filters?.archived) sp.set("archived", "true");
+  if (filters?.favorite) sp.set("favorite", "true");
+  if (filters?.folders?.length) sp.set("folders", filters.folders.join(","));
+  if (filters?.platform) sp.set("platform", filters.platform);
+  const qs = sp.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export const api = {
   listItems: (params?: ListItemsParams) => {
     if (MIRROR) return mirrorListItems(params);
@@ -451,6 +529,34 @@ export const api = {
     if (params.item_id !== undefined) sp.set("item_id", String(params.item_id));
     return req<SearchHit[]>(`/api/search?${sp.toString()}`);
   },
+
+  getGraph: (filters?: GraphFilters) =>
+    MIRROR
+      ? mirrorGraph()
+      : req<GraphData>(`/api/graph${graphFilterParams(filters)}`),
+  getClusterItems: (clusterId: number, offset = 0, filters?: GraphFilters) => {
+    if (MIRROR) return mirrorClusterItems(clusterId, offset);
+    const sp = new URLSearchParams(graphFilterParams(filters).replace(/^\?/, ""));
+    sp.set("offset", String(offset));
+    return req<GraphItemBrief[]>(
+      `/api/graph/clusters/${clusterId}/items?${sp.toString()}`,
+    );
+  },
+  getRelated: (id: number) =>
+    MIRROR ? mirrorRelated(id) : req<RelatedItem[]>(`/api/items/${id}/related`),
+  getItemCluster: async (id: number): Promise<number | null> => {
+    if (MIRROR) {
+      const graph = await mirrorGraph();
+      const node = graph.nodes.find((n) => n.items.some((it) => it.item_id === id));
+      return node ? node.id : null;
+    }
+    const res = await req<{ cluster_id: number | null }>(
+      `/api/graph/items/${id}/cluster`,
+    );
+    return res.cluster_id;
+  },
+  rebuildGraph: () =>
+    req<{ ok: boolean; job_id: string }>("/api/graph/rebuild", { method: "POST" }),
 
   getStats: (refresh?: boolean) =>
     req<Stats>(`/api/stats${refresh ? "?refresh=true" : ""}`),

@@ -19,6 +19,7 @@ import { api, type StageRun, type Comment } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
+import { RelatedArticles } from "@/components/RelatedArticles";
 import {
   formatBytes,
   formatCost,
@@ -298,6 +299,8 @@ export function ItemDetail() {
           </div>
         )}
       </div>
+
+      {["done", "error"].includes(d.status) && <RelatedArticles itemId={itemId} />}
     </div>
   );
 }

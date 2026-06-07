@@ -57,3 +57,19 @@ def enqueue_poll(subscription_id: int) -> str:
         result_ttl=3600,
     )
     return job.id
+
+
+def enqueue_graph_build(force: bool = False) -> str:
+    """(Re)build the knowledge graph of topic clusters on the worker.
+
+    A fixed job_id makes it idempotent: queueing again while one is pending is a
+    no-op. It simply queues behind any ingest jobs on the single worker.
+    """
+    job = get_queue().enqueue(
+        "app.pipeline.graph_build.build_graph",
+        force,
+        job_id="graph-build",
+        result_ttl=3600,
+        failure_ttl=86400,
+    )
+    return job.id

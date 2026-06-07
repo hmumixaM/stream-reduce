@@ -44,6 +44,7 @@ class StageName(str, Enum):
     summarize = "summarize"
     gemini_audio = "gemini_audio"
     embed = "embed"
+    graph = "graph"
 
 
 class ChunkSource(str, Enum):
@@ -246,3 +247,71 @@ class ApiCall(SQLModel, table=True):
     tokens: int = 0
     cost_usd: float = 0.0
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# --- Knowledge graph (derived, periodically rebuilt) ------------------------
+# Topic clusters come from Louvain community detection over a cosine kNN graph of
+# the existing chunk embeddings. Every table below is derived data: a rebuild
+# wipes and rewrites it, and it is never the source of truth.
+
+
+class TopicCluster(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    build_id: int = Field(default=0, index=True)
+    label: str = ""
+    # Top representative terms/entities for the cluster.
+    keywords: list = Field(default_factory=list, sa_column=Column(JSON))
+    # Number of member chunks (graph nodes) in the community.
+    size: int = 0
+    # Number of distinct items (articles) touching the cluster.
+    item_count: int = 0
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ClusterMembership(SQLModel, table=True):
+    """Item <-> cluster link. An item can belong to several clusters (its chunks
+    spread across topics); ``weight`` (share of the item's chunks landing in the
+    cluster) makes filtered re-aggregation cheap without touching vectors."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    chunk_count: int = 0
+    weight: float = 0.0
+
+
+class TopicEdge(SQLModel, table=True):
+    """Undirected adjacency between two topic clusters (centroid cosine).
+
+    Stored once per pair with ``src_cluster_id < dst_cluster_id``."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    src_cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
+    dst_cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
+    weight: float = 0.0
+
+
+class ItemRecommendation(SQLModel, table=True):
+    """Per-item related-article recommendation (summed cross-article kNN weight)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    related_item_id: int = Field(foreign_key="item.id", index=True)
+    score: float = 0.0
+
+
+class GraphCache(SQLModel, table=True):
+    """Single-row cache (id=1) holding the pre-serialized unfiltered graph blob
+    plus build metadata. The common case (unified graph + static mirror) is a
+    single read with zero compute; a fingerprint lets the nightly build skip when
+    nothing changed."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    build_id: int = 0
+    # JSON string: {built_at, build_id, nodes, edges}.
+    blob: str = Field(default="", sa_column=Column(Text))
+    # Content fingerprint of the chunk table at build time (skip if unchanged).
+    fingerprint: str = ""
+    cluster_count: int = 0
+    item_count: int = 0
+    built_at: datetime = Field(default_factory=utcnow)

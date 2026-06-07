@@ -22,8 +22,12 @@ summaries and keeps them in a searchable library.
 - **Semantic search**: every transcript and summary is chunked and embedded
   with `text-embedding-005` (via the same LiteLLM proxy) into a `sqlite-vec`
   index, so you can search by meaning and jump straight to the source passage —
-  from the UI, the REST API, or an AI agent. The chunk-level vectors are also
-  the foundation for a future knowledge graph that links related content.
+  from the UI, the REST API, or an AI agent.
+- **Knowledge graph**: the chunk vectors are periodically clustered into topic
+  communities (a cosine kNN graph + Louvain) and rendered as an interactive,
+  Obsidian-style graph. Click a topic to see its articles and neighboring
+  topics; each article page recommends related articles. Filterable in the live
+  app and unified in the static mirror.
 - **Subscriptions**: poll feeds on a schedule and auto-summarize new items.
 - **MCP**: a minimal [Model Context Protocol](https://modelcontextprotocol.io)
   server is mounted at `/mcp` so AI agents can operate the app (add content,
@@ -41,13 +45,14 @@ React SPA ──► FastAPI (REST + serves SPA) ──► SQLite
                   │                              ▲
                   ├── enqueue ──► Redis (RQ) ──► Worker
                   │                              │
-                  └── APScheduler (poll feeds)   ├─ yt-dlp / iTunes API / RSS
-                                                 ├─ OpenRouter Whisper (STT)
-                                                 ├─ Gemini via LiteLLM (summary)
-                                                 └─ text-embedding-005 (embed)
-                                                      │
-                                                      ▼
-                                            sqlite-vec index (semantic search)
+                  └── APScheduler ──────────────┤  ├─ yt-dlp / iTunes API / RSS
+                      (poll feeds,               │  ├─ OpenRouter Whisper (STT)
+                       nightly graph)            │  ├─ Gemini via LiteLLM (summary)
+                                                 │  ├─ text-embedding-005 (embed)
+                                                 │  └─ graph build (cluster topics)
+                                                 ▼
+                                       sqlite-vec index (semantic search)
+                                       + topic-cluster knowledge graph
 ```
 
 ## Configuration
@@ -159,7 +164,9 @@ the app reads pre-exported JSON under `/data` instead of the live API, hides
 every write/admin surface (add, settings, stats, queue, subscriptions, folder
 editing, favorite, archive, comments), and replaces semantic search with an
 in-browser keyword index ([`minisearch`](https://github.com/lucaong/minisearch))
-— so there is no backend, database, or secret to host.
+— so there is no backend, database, or secret to host. The knowledge **Graph**
+ships too as a unified `graph.json` (filters are a live-only feature), and each
+item carries its related-article recommendations inline.
 
 ```
 NAS API (:8010 via SSH tunnel) ──► mirror/export.py ──► mirror/dist/data/*.json
@@ -272,6 +279,38 @@ Everything is additive and backward compatible: the `chunk`/`chunk_vec` tables
 are created automatically on startup, existing items/transcripts/summaries are
 never modified, and only derived chunk rows are (re)written. Set
 `ENABLE_EMBEDDINGS=false` to turn the feature off entirely.
+
+## Knowledge graph of topics
+
+The same chunk vectors power a **knowledge graph of topic clusters**, built
+without any new heavy dependencies (just `numpy` + `networkx`) and kept
+memory-light on a NAS:
+
+- **Build** (`app/pipeline/graph_build.py`, on the worker): a cosine **kNN graph**
+  is streamed straight from `sqlite-vec` — for each chunk we fetch its top-k
+  neighbors with the on-disk brute-force `MATCH` query and accumulate edges into a
+  sparse graph one chunk at a time, so the full vector matrix is **never** loaded
+  into RAM. **Louvain** community detection (`networkx`) then groups chunks into
+  topics; per-cluster centroids (a single streaming pass) give inter-topic edges,
+  and summed cross-article neighbor weights give per-item recommendations.
+- **Derived tables** (`topiccluster`, `clustermembership`, `topicedge`,
+  `itemrecommendation`) are wiped + rewritten each build; the unfiltered graph is
+  pre-serialized into a `graphcache` blob so the common read is **zero compute**.
+  A chunk fingerprint lets an unchanged build exit early.
+- **Schedule**: a nightly APScheduler job (`GRAPH_REBUILD_HOURS`) enqueues a
+  rebuild on the existing worker/queue; `POST /api/graph/rebuild` triggers one
+  manually. Run once for existing content with
+  `uv run python -m app.pipeline.graph_build --force`.
+- **Use it**: the **Graph** page (interactive, Obsidian-style; filter by
+  favorite / archived / folder / platform; jump-to-topic search), the related
+  articles grid at the bottom of each item, or the REST API
+  (`GET /api/graph`, `GET /api/graph/clusters/{id}/items`,
+  `GET /api/items/{id}/related`). All of it works in the static mirror too (a
+  unified `graph.json` + `related` embedded in each item).
+
+Tunables live in `app/config.py` (`GRAPH_KNN_K`, `GRAPH_SIM_THRESHOLD`,
+`GRAPH_LOUVAIN_RESOLUTION`, `GRAPH_EDGE_THRESHOLD`, `GRAPH_MAX_CHUNKS`, …). Set
+`ENABLE_GRAPH=false` to turn it off.
 
 ## How summarization stays source-traceable
 

@@ -67,6 +67,28 @@ class Settings(BaseSettings):
     # Max texts per embedding request; bounds in-flight memory.
     embed_batch_size: int = 32
 
+    # Knowledge graph of topic clusters (Louvain over a cosine kNN graph of the
+    # existing chunk vectors). All work runs in the worker, async/nightly.
+    enable_graph: bool = True
+    # Neighbors fetched per chunk when building the kNN graph (sparse, on-disk).
+    graph_knn_k: int = 10
+    # Minimum cosine similarity for a kNN edge to count (prunes weak links).
+    graph_sim_threshold: float = 0.6
+    # Louvain resolution; >1 yields more, smaller topics (counters the
+    # resolution limit that merges small topics into one giant blob).
+    graph_louvain_resolution: float = 1.2
+    # Safety cap on chunks considered (most-recent first beyond this); bounds the
+    # O(N) KNN passes for very large libraries.
+    graph_max_chunks: int = 20000
+    # Min cosine between cluster centroids for an inter-topic edge, and how many
+    # neighbor topics to keep per cluster.
+    graph_edge_threshold: float = 0.55
+    graph_edge_top_k: int = 6
+    # Related-article recommendations kept per item.
+    graph_related_top_k: int = 8
+    # How often the scheduler triggers an automatic rebuild.
+    graph_rebuild_hours: int = 24
+
     # MCP server for AI agents (mounted at /mcp on the web app)
     enable_mcp: bool = True
 

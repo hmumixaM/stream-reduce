@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   LayoutGrid,
   Search as SearchIcon,
+  Network,
   ListChecks,
   Rss,
   BarChart3,
@@ -21,16 +22,17 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { to: "/", label: "Library", icon: LayoutGrid, end: true },
   { to: "/search", label: "Search", icon: SearchIcon },
+  { to: "/graph", label: "Graph", icon: Network },
   { to: "/queue", label: "Queue", icon: ListChecks },
   { to: "/subscriptions", label: "Subscriptions", icon: Rss },
   { to: "/stats", label: "Stats", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
-// The public mirror is read-only: only browsing + search are reachable.
-const NAV_ITEMS = MIRROR
-  ? NAV.filter((item) => item.to === "/" || item.to === "/search")
-  : NAV;
+// The public mirror is read-only: browsing, search, and the unified graph are
+// reachable.
+const MIRROR_NAV = new Set(["/", "/search", "/graph"]);
+const NAV_ITEMS = MIRROR ? NAV.filter((item) => MIRROR_NAV.has(item.to)) : NAV;
 
 function AddDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [text, setText] = useState("");
