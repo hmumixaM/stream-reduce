@@ -11,6 +11,7 @@ from sqlmodel import Session, col, select
 from app.db import get_session
 from app.models import (
     Comment,
+    Highlight,
     Item,
     ItemGroup,
     ItemStatus,
@@ -28,6 +29,9 @@ from app.schemas import (
     GroupCreate,
     GroupRead,
     GroupUpdate,
+    HighlightCreate,
+    HighlightRead,
+    HighlightUpdate,
     ItemDetail,
     ItemGroupAssign,
     ItemRead,
@@ -210,6 +214,9 @@ def get_item(item_id: int, session: Session = Depends(get_session)) -> ItemDetai
     comments = session.exec(
         select(Comment).where(Comment.item_id == item_id).order_by(col(Comment.created_at))
     ).all()
+    highlights = session.exec(
+        select(Highlight).where(Highlight.item_id == item_id).order_by(col(Highlight.created_at))
+    ).all()
     detail = ItemDetail.model_validate(item, from_attributes=True)
     detail.summary = SummaryRead.model_validate(summary, from_attributes=True) if summary else None
     detail.transcript = (
@@ -217,6 +224,7 @@ def get_item(item_id: int, session: Session = Depends(get_session)) -> ItemDetai
     )
     detail.stages = [StageRunRead.model_validate(s, from_attributes=True) for s in stages]
     detail.comments = [CommentRead.model_validate(c, from_attributes=True) for c in comments]
+    detail.highlights = [HighlightRead.model_validate(h, from_attributes=True) for h in highlights]
     return detail
 
 
@@ -335,6 +343,61 @@ def delete_comment(
     return {"ok": True}
 
 
+@router.post("/{item_id}/highlights", response_model=HighlightRead)
+def add_highlight(
+    item_id: int, payload: HighlightCreate, session: Session = Depends(get_session)
+) -> Highlight:
+    _get_or_404(session, item_id)
+    quote = payload.quote.strip()
+    if not quote:
+        raise HTTPException(status_code=400, detail="empty highlight")
+    highlight = Highlight(
+        item_id=item_id,
+        source=payload.source,
+        quote=quote,
+        note=payload.note.strip(),
+        color=payload.color or "yellow",
+        prefix=payload.prefix,
+        suffix=payload.suffix,
+    )
+    session.add(highlight)
+    session.commit()
+    session.refresh(highlight)
+    return highlight
+
+
+@router.patch("/{item_id}/highlights/{highlight_id}", response_model=HighlightRead)
+def update_highlight(
+    item_id: int,
+    highlight_id: int,
+    payload: HighlightUpdate,
+    session: Session = Depends(get_session),
+) -> Highlight:
+    highlight = session.get(Highlight, highlight_id)
+    if highlight is None or highlight.item_id != item_id:
+        raise HTTPException(status_code=404, detail="highlight not found")
+    if payload.note is not None:
+        highlight.note = payload.note.strip()
+    if payload.color is not None:
+        highlight.color = payload.color
+    session.add(highlight)
+    session.commit()
+    session.refresh(highlight)
+    return highlight
+
+
+@router.delete("/{item_id}/highlights/{highlight_id}")
+def delete_highlight(
+    item_id: int, highlight_id: int, session: Session = Depends(get_session)
+) -> dict:
+    highlight = session.get(Highlight, highlight_id)
+    if highlight is None or highlight.item_id != item_id:
+        raise HTTPException(status_code=404, detail="highlight not found")
+    session.delete(highlight)
+    session.commit()
+    return {"ok": True}
+
+
 @router.delete("/{item_id}/media")
 def delete_media(item_id: int, session: Session = Depends(get_session)) -> ItemRead:
     """Delete only the retained downloaded audio file (keeps the item + summary).
@@ -360,7 +423,7 @@ def delete_item(item_id: int, session: Session = Depends(get_session)) -> dict:
         raise HTTPException(status_code=404, detail="item not found")
     group_id = item.group_id
     _delete_media_file(item)
-    for model in (Summary, Transcript, StageRun, Comment):
+    for model in (Summary, Transcript, StageRun, Comment, Highlight):
         for row in session.exec(select(model).where(model.item_id == item_id)).all():
             session.delete(row)
     session.delete(item)

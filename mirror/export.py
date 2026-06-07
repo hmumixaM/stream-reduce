@@ -10,8 +10,8 @@ tunnel) and writes, under ``<out_dir>/data``:
                            with stages / comments / media internals dropped.
 - ``search-index.json`` -> flat passage docs (transcript windows + summary
                            fields) for the client-side keyword index.
-- ``graph.json``        -> the unified topic-cluster knowledge graph (nodes with
-                           their full member lists embedded + inter-topic edges).
+- ``graph.json``        -> the unified paragraph knowledge graph (summary
+                           paragraphs as nodes + similarity edges).
 - ``meta.json``         -> ``{generated_at, item_count}``.
 
 The mirror is read-only and keyword-searched in the browser, so no embeddings,
@@ -208,27 +208,14 @@ def _slim_detail(detail: dict[str, Any]) -> dict[str, Any]:
     slim = _slim_item(detail)
     slim["stages"] = []
     slim["comments"] = []
+    slim["highlights"] = []
     return slim
 
 
 def _fetch_graph(fetch: FetchJson) -> dict[str, Any]:
-    """The unified graph with each node's full member list embedded (the mirror
-    has no live API for the panel's lazy 'show all')."""
-    graph = fetch("/api/graph", None) or {}
-    for node in graph.get("nodes", []):
-        members: list[dict[str, Any]] = []
-        offset = 0
-        while True:
-            page = fetch(
-                f"/api/graph/clusters/{node['id']}/items",
-                {"offset": offset, "limit": PAGE_SIZE},
-            )
-            members.extend(page)
-            if len(page) < PAGE_SIZE:
-                break
-            offset += PAGE_SIZE
-        node["items"] = members
-    return graph
+    """The unified paragraph graph (nodes already carry their text, so this is a
+    single fetch; the mirror serves it as-is)."""
+    return fetch("/api/graph", None) or {}
 
 
 def _export_thumbnails(
@@ -288,7 +275,7 @@ def export(fetch: FetchJson, fetch_bytes: FetchBytes, out_dir: Path) -> dict[str
         "item_count": len(slim_items),
         "search_docs": len(search_docs),
         "thumbnails": thumbnails,
-        "graph_topics": len(graph.get("nodes", [])),
+        "graph_nodes": len(graph.get("nodes", [])),
     }
     (data_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False))
     return meta
@@ -335,7 +322,7 @@ def main() -> None:
     meta = export(fetch, fetch_bytes, args.out)
     print(
         f"Exported {meta['item_count']} items, {meta['search_docs']} search docs, "
-        f"{meta['graph_topics']} graph topics, {meta['thumbnails']} thumbnails "
+        f"{meta['graph_nodes']} graph nodes, {meta['thumbnails']} thumbnails "
         f"-> {args.out / 'data'}"
     )
 

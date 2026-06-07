@@ -102,11 +102,55 @@ export interface Comment {
   created_at: string;
 }
 
+export type HighlightSource = "summary" | "transcript";
+
+export interface Highlight {
+  id: number;
+  item_id: number;
+  source: HighlightSource;
+  quote: string;
+  note: string;
+  color: string;
+  prefix: string;
+  suffix: string;
+  created_at: string;
+}
+
+export interface NewHighlight {
+  quote: string;
+  source: HighlightSource;
+  note?: string;
+  color?: string;
+  prefix?: string;
+  suffix?: string;
+}
+
+export interface ItemBrief {
+  id: number;
+  title?: string | null;
+  platform: Platform;
+  source_url: string;
+  author?: string | null;
+  thumbnail?: string | null;
+}
+
+export interface Annotation {
+  kind: "highlight" | "comment";
+  id: number;
+  item: ItemBrief;
+  created_at: string;
+  quote?: string | null;
+  source?: HighlightSource | null;
+  color?: string | null;
+  body: string;
+}
+
 export interface ItemDetail extends Item {
   summary?: Summary | null;
   transcript?: Transcript | null;
   stages: StageRun[];
   comments: Comment[];
+  highlights: Highlight[];
   // Only present in the static mirror bundle (related articles embedded so the
   // recommendation grid works without a live API).
   related?: RelatedItem[];
@@ -180,26 +224,17 @@ export interface SearchHit {
   score: number;
 }
 
-export interface GraphItemBrief {
-  id: number;
+// A node is a single summary paragraph; edges link paragraphs by embedding
+// similarity. Communities only color the nodes.
+export interface GraphNode {
+  id: number; // chunk_id
   item_id: number;
   title?: string | null;
   platform: Platform;
-  author?: string | null;
-  thumbnail?: string | null;
-  source_url: string;
-  weight: number;
-  chunk_count: number;
-  score?: number;
-}
-
-export interface GraphNode {
-  id: number;
-  label: string;
-  keywords: string[];
-  size: number;
-  item_count: number;
-  items: GraphItemBrief[];
+  field: string;
+  text: string;
+  community: number;
+  degree: number;
 }
 
 export interface GraphEdge {
@@ -215,7 +250,16 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
-export type RelatedItem = GraphItemBrief & { score: number };
+export interface RelatedItem {
+  id: number;
+  item_id: number;
+  title?: string | null;
+  platform: Platform;
+  author?: string | null;
+  thumbnail?: string | null;
+  source_url: string;
+  score: number;
+}
 
 export interface GraphFilters {
   archived?: boolean;
@@ -409,20 +453,10 @@ async function mirrorSearch(params: SearchParams): Promise<SearchHit[]> {
   );
 }
 
-// In mirror mode the graph is unified (filters are ignored) and the full member
-// list is embedded in each node, so "show all" + related read straight from the
-// pre-exported JSON with no live API.
+// In mirror mode the graph is unified (filters are ignored), read straight from
+// the pre-exported JSON with no live API.
 async function mirrorGraph(): Promise<GraphData> {
   return mirrorJson<GraphData>("/data/graph.json");
-}
-
-async function mirrorClusterItems(
-  clusterId: number,
-  offset: number,
-): Promise<GraphItemBrief[]> {
-  const graph = await mirrorGraph();
-  const node = graph.nodes.find((n) => n.id === clusterId);
-  return (node?.items ?? []).slice(offset);
 }
 
 async function mirrorRelated(itemId: number): Promise<RelatedItem[]> {
@@ -505,6 +539,32 @@ export const api = {
   deleteComment: (itemId: number, commentId: number) =>
     req<void>(`/api/items/${itemId}/comments/${commentId}`, { method: "DELETE" }),
 
+  addHighlight: (id: number, payload: NewHighlight) =>
+    req<Highlight>(`/api/items/${id}/highlights`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateHighlight: (
+    itemId: number,
+    highlightId: number,
+    payload: { note?: string; color?: string },
+  ) =>
+    req<Highlight>(`/api/items/${itemId}/highlights/${highlightId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteHighlight: (itemId: number, highlightId: number) =>
+    req<void>(`/api/items/${itemId}/highlights/${highlightId}`, {
+      method: "DELETE",
+    }),
+  listAnnotations: (params?: { kind?: "highlight" | "comment"; item_id?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.kind) sp.set("kind", params.kind);
+    if (params?.item_id !== undefined) sp.set("item_id", String(params.item_id));
+    const qs = sp.toString();
+    return req<Annotation[]>(`/api/annotations${qs ? `?${qs}` : ""}`);
+  },
+
   listQueue: () => req<QueueItem[]>("/api/queue"),
 
   listSubscriptions: () => req<Subscription[]>("/api/subscriptions"),
@@ -534,26 +594,18 @@ export const api = {
     MIRROR
       ? mirrorGraph()
       : req<GraphData>(`/api/graph${graphFilterParams(filters)}`),
-  getClusterItems: (clusterId: number, offset = 0, filters?: GraphFilters) => {
-    if (MIRROR) return mirrorClusterItems(clusterId, offset);
-    const sp = new URLSearchParams(graphFilterParams(filters).replace(/^\?/, ""));
-    sp.set("offset", String(offset));
-    return req<GraphItemBrief[]>(
-      `/api/graph/clusters/${clusterId}/items?${sp.toString()}`,
-    );
-  },
   getRelated: (id: number) =>
     MIRROR ? mirrorRelated(id) : req<RelatedItem[]>(`/api/items/${id}/related`),
-  getItemCluster: async (id: number): Promise<number | null> => {
+  getItemFocus: async (id: number): Promise<number | null> => {
     if (MIRROR) {
       const graph = await mirrorGraph();
-      const node = graph.nodes.find((n) => n.items.some((it) => it.item_id === id));
+      const node = graph.nodes.find((n) => n.item_id === id);
       return node ? node.id : null;
     }
-    const res = await req<{ cluster_id: number | null }>(
-      `/api/graph/items/${id}/cluster`,
+    const res = await req<{ node_id: number | null }>(
+      `/api/graph/items/${id}/focus`,
     );
-    return res.cluster_id;
+    return res.node_id;
   },
   rebuildGraph: () =>
     req<{ ok: boolean; job_id: string }>("/api/graph/rebuild", { method: "POST" }),

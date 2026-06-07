@@ -9,7 +9,16 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import graph, items, queue, search, settings, stats, subscriptions
+from app.api import (
+    annotations,
+    graph,
+    items,
+    queue,
+    search,
+    settings,
+    stats,
+    subscriptions,
+)
 from app.config import PROJECT_ROOT, get_settings
 from app.db import init_db
 from app.mcp_server import build_mcp_app
@@ -43,6 +52,7 @@ async def lifespan(app_: FastAPI):
 app = FastAPI(title="stream-reduce", version="0.2.0", lifespan=lifespan)
 
 app.include_router(items.router)
+app.include_router(annotations.router)
 app.include_router(queue.router)
 app.include_router(subscriptions.router)
 app.include_router(stats.router)

@@ -7,7 +7,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.models import ItemStatus, Platform, StageName, StageStatus, TranscriptSource
+from app.models import (
+    HighlightSource,
+    ItemStatus,
+    Platform,
+    StageName,
+    StageStatus,
+    TranscriptSource,
+)
 
 
 class AddItemRequest(BaseModel):
@@ -131,11 +138,66 @@ class CommentCreate(BaseModel):
     body: str
 
 
+class HighlightRead(BaseModel):
+    id: int
+    item_id: int
+    source: HighlightSource
+    quote: str
+    note: str
+    color: str
+    prefix: str
+    suffix: str
+    created_at: datetime
+
+
+class HighlightCreate(BaseModel):
+    quote: str
+    source: HighlightSource = HighlightSource.summary
+    note: str = ""
+    color: str = "yellow"
+    prefix: str = ""
+    suffix: str = ""
+
+
+class HighlightUpdate(BaseModel):
+    """Edit an existing highlight's annotation (null fields are left unchanged)."""
+
+    note: str | None = None
+    color: str | None = None
+
+
 class ItemDetail(ItemRead):
     summary: SummaryRead | None = None
     transcript: TranscriptRead | None = None
     stages: list[StageRunRead] = []
     comments: list[CommentRead] = []
+    highlights: list[HighlightRead] = []
+
+
+class ItemBrief(BaseModel):
+    """Lightweight item context attached to each cross-item annotation row."""
+
+    id: int
+    title: str | None = None
+    platform: Platform
+    source_url: str
+    author: str | None = None
+    thumbnail: str | None = None
+
+
+class AnnotationRead(BaseModel):
+    """A unified highlight-or-comment row for the cross-item annotations feed."""
+
+    kind: str  # "highlight" | "comment"
+    id: int
+    item: ItemBrief
+    created_at: datetime
+    # Highlight-only fields.
+    quote: str | None = None
+    source: HighlightSource | None = None
+    color: str | None = None
+    # Both: the note (highlight.note) or the comment body.
+    body: str = ""
 
 
 class QueueItemRead(ItemRead):

@@ -1,7 +1,6 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
 import {
   ArrowLeft,
   RefreshCw,
@@ -14,12 +13,20 @@ import {
   MessageSquare,
   Send,
   BookOpen,
+  Highlighter,
 } from "lucide-react";
-import { api, type StageRun, type Comment } from "@/lib/api";
+import {
+  api,
+  type StageRun,
+  type Comment,
+  type Highlight,
+  type NewHighlight,
+} from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Spinner } from "@/components/ui";
 import { PlatformBadge, StatusBadge } from "@/components/badges";
 import { RelatedArticles } from "@/components/RelatedArticles";
+import { HighlightableMarkdown, HighlightLayer, hlClass } from "@/components/Highlightable";
 import {
   formatBytes,
   formatCost,
@@ -86,11 +93,35 @@ export function ItemDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["item", itemId] }),
   });
 
+  const refreshAnnotations = () => {
+    qc.invalidateQueries({ queryKey: ["item", itemId] });
+    qc.invalidateQueries({ queryKey: ["annotations"] });
+  };
+  const addHighlight = useMutation({
+    mutationFn: (h: NewHighlight) => api.addHighlight(itemId, h),
+    onSuccess: refreshAnnotations,
+  });
+  const updateHighlight = useMutation({
+    mutationFn: ({ id, note }: { id: number; note: string }) =>
+      api.updateHighlight(itemId, id, { note }),
+    onSuccess: refreshAnnotations,
+  });
+  const deleteHighlight = useMutation({
+    mutationFn: (id: number) => api.deleteHighlight(itemId, id),
+    onSuccess: refreshAnnotations,
+  });
+
   if (item.isLoading) return <p className="text-muted-foreground">Loading...</p>;
   if (item.isError || !item.data)
     return <p className="text-red-400">Failed to load item.</p>;
 
   const d = item.data;
+  const summaryHighlights = d.highlights?.filter((h) => h.source === "summary") ?? [];
+  const transcriptHighlights = d.highlights?.filter((h) => h.source === "transcript") ?? [];
+  const onCreateHighlight = (h: NewHighlight) => addHighlight.mutate(h);
+  const onUpdateHighlight = (id: number, note: string) =>
+    updateHighlight.mutate({ id, note });
+  const onDeleteHighlight = (id: number) => deleteHighlight.mutate(id);
 
   return (
     <div className={readMode ? "mx-auto max-w-3xl" : ""}>
@@ -191,9 +222,16 @@ export function ItemDetail() {
         <div className={readMode ? "" : "lg:col-span-2"}>
           {d.summary ? (
             <Card className={readMode ? "border-none shadow-none bg-transparent" : "p-6"}>
-              <div className={readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm"}>
-                <ReactMarkdown>{d.summary.markdown}</ReactMarkdown>
-              </div>
+              <HighlightableMarkdown
+                markdown={d.summary.markdown}
+                highlights={summaryHighlights}
+                source="summary"
+                readOnly={MIRROR}
+                onCreate={onCreateHighlight}
+                onUpdateNote={onUpdateHighlight}
+                onDelete={onDeleteHighlight}
+                className={readMode ? "prose-read max-w-none" : "prose-sr max-w-none text-sm"}
+              />
             </Card>
           ) : (
             <Card className="flex items-center gap-3 p-6 text-muted-foreground">
@@ -225,18 +263,24 @@ export function ItemDetail() {
                 />
               </button>
               {showTranscript && (
-                <div className="mt-3 max-h-96 space-y-1 overflow-auto text-sm text-muted-foreground">
-                  {d.transcript.segments.map((seg, i) => (
-                    <p key={i}>
-                      <span className="mr-2 font-mono text-xs text-primary">
-                        {formatTs(seg.start)}
-                      </span>
-                      {seg.text}
-                    </p>
-                  ))}
-                </div>
+                <TranscriptBody
+                  segments={d.transcript.segments}
+                  highlights={transcriptHighlights}
+                  readOnly={MIRROR}
+                  onCreate={onCreateHighlight}
+                  onUpdateNote={onUpdateHighlight}
+                  onDelete={onDeleteHighlight}
+                />
               )}
             </Card>
+          )}
+
+          {d.highlights.length > 0 && (
+            <HighlightsList
+              highlights={d.highlights}
+              readOnly={MIRROR}
+              onDelete={onDeleteHighlight}
+            />
           )}
 
           {!MIRROR && (
@@ -559,6 +603,91 @@ function CommentsSection({
           {add.isPending ? <Spinner /> : <Send className="h-4 w-4" />}
         </Button>
       </form>
+    </Card>
+  );
+}
+
+function TranscriptBody({
+  segments,
+  highlights,
+  readOnly,
+  onCreate,
+  onUpdateNote,
+  onDelete,
+}: {
+  segments: { start: number; end: number; text: string }[];
+  highlights: Highlight[];
+  readOnly: boolean;
+  onCreate: (h: NewHighlight) => void;
+  onUpdateNote: (id: number, note: string) => void;
+  onDelete: (id: number) => void;
+}) {
+  const body = useMemo(
+    () => (
+      <div className="space-y-1">
+        {segments.map((seg, i) => (
+          <p key={i}>
+            <span className="mr-2 font-mono text-xs text-primary">{formatTs(seg.start)}</span>
+            {seg.text}
+          </p>
+        ))}
+      </div>
+    ),
+    [segments],
+  );
+  return (
+    <HighlightLayer
+      highlights={highlights}
+      source="transcript"
+      readOnly={readOnly}
+      onCreate={onCreate}
+      onUpdateNote={onUpdateNote}
+      onDelete={onDelete}
+      className="mt-3 max-h-96 overflow-auto text-sm text-muted-foreground"
+    >
+      {body}
+    </HighlightLayer>
+  );
+}
+
+function HighlightsList({
+  highlights,
+  readOnly,
+  onDelete,
+}: {
+  highlights: Highlight[];
+  readOnly: boolean;
+  onDelete: (id: number) => void;
+}) {
+  return (
+    <Card className="mt-4 p-4">
+      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
+        <Highlighter className="h-4 w-4" /> Highlights
+        <span className="text-muted-foreground">({highlights.length})</span>
+      </h2>
+      <div className="space-y-3">
+        {highlights.map((h) => (
+          <div key={h.id} className="group flex gap-3 rounded-md border border-border p-3">
+            <span className={cn("mt-1 h-3 w-3 shrink-0 rounded-full", hlClass(h.color))} />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm italic text-muted-foreground">“{h.quote}”</p>
+              {h.note && <p className="mt-1 whitespace-pre-wrap text-sm">{h.note}</p>}
+              <p className="mt-1 text-xs text-muted-foreground">
+                {h.source} · {timeAgo(h.created_at)}
+              </p>
+            </div>
+            {!readOnly && (
+              <button
+                onClick={() => onDelete(h.id)}
+                title="Delete highlight"
+                className="self-start opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }

@@ -1,9 +1,9 @@
-"""Read-side helpers for the topic-cluster knowledge graph.
+"""Read-side helpers for the paragraph-similarity knowledge graph.
 
 Serialization + filtered aggregation shared by the build job (which pre-renders
 the unfiltered graph into ``graphcache``), the REST API, and the static mirror.
 The unfiltered case is a single cache read; filtered requests re-aggregate the
-small ``clustermembership`` table in-process (no re-clustering, no vectors).
+small node/link tables in-process (no recompute, no vectors).
 """
 
 from __future__ import annotations
@@ -14,20 +14,14 @@ from datetime import datetime
 from sqlmodel import Session, col, select
 
 from app.models import (
-    ClusterMembership,
     GraphCache,
+    GraphLink,
+    GraphParagraph,
     Item,
     ItemRecommendation,
     Platform,
-    TopicCluster,
-    TopicEdge,
     utcnow,
 )
-
-# Member items embedded directly in each graph node for instant render; the rest
-# are fetched lazily via the cluster-items endpoint (or embedded in full in the
-# mirror's graph.json).
-NODE_ITEM_PREVIEW = 12
 
 
 @dataclass
@@ -46,20 +40,6 @@ class GraphFilters:
             and not self.folders
             and not self.platform
         )
-
-
-def _item_brief(item: Item, *, weight: float = 0.0, chunk_count: int = 0) -> dict:
-    return {
-        "id": item.id,
-        "item_id": item.id,
-        "title": item.title,
-        "platform": item.platform.value,
-        "author": item.author,
-        "thumbnail": item.thumbnail,
-        "source_url": item.source_url,
-        "weight": round(weight, 4),
-        "chunk_count": chunk_count,
-    }
 
 
 def _allowed_item_ids(session: Session, filters: GraphFilters) -> set[int]:
@@ -82,56 +62,42 @@ def aggregate_graph(
     build_id: int | None = None,
     built_at: datetime | None = None,
 ) -> dict:
-    """Build the graph payload from normalized tables, optionally restricted to a
-    set of item ids (``None`` => the full, unfiltered graph)."""
-    clusters = session.exec(select(TopicCluster)).all()
-    cluster_by_id = {c.id: c for c in clusters}
-
-    mem_stmt = select(ClusterMembership)
+    """Build the paragraph-graph payload from the node/link tables, optionally
+    restricted to a set of item ids (``None`` => the full, unfiltered graph)."""
+    node_stmt = select(GraphParagraph)
     if allowed_item_ids is not None:
-        mem_stmt = mem_stmt.where(col(ClusterMembership.item_id).in_(allowed_item_ids or {-1}))
-    memberships = session.exec(mem_stmt).all()
+        node_stmt = node_stmt.where(col(GraphParagraph.item_id).in_(allowed_item_ids or {-1}))
+    paragraphs = session.exec(node_stmt).all()
 
-    by_cluster: dict[int, list[ClusterMembership]] = {}
-    item_ids: set[int] = set()
-    for m in memberships:
-        by_cluster.setdefault(m.cluster_id, []).append(m)
-        item_ids.add(m.item_id)
-
+    item_ids = {p.item_id for p in paragraphs}
     items = session.exec(select(Item).where(col(Item.id).in_(item_ids or {-1}))).all()
     item_by_id = {i.id: i for i in items}
 
     nodes: list[dict] = []
     surviving: set[int] = set()
-    for cluster_id, mems in by_cluster.items():
-        cluster = cluster_by_id.get(cluster_id)
-        if cluster is None:
+    for p in paragraphs:
+        item = item_by_id.get(p.item_id)
+        if item is None:
             continue
-        mems = sorted(mems, key=lambda m: m.weight, reverse=True)
-        preview = [
-            _item_brief(item_by_id[m.item_id], weight=m.weight, chunk_count=m.chunk_count)
-            for m in mems[:NODE_ITEM_PREVIEW]
-            if m.item_id in item_by_id
-        ]
-        if not preview:
-            continue
-        surviving.add(cluster_id)
+        surviving.add(p.chunk_id)
         nodes.append(
             {
-                "id": cluster_id,
-                "label": cluster.label,
-                "keywords": cluster.keywords,
-                "size": cluster.size,
-                "item_count": len(mems),
-                "items": preview,
+                "id": p.chunk_id,
+                "item_id": p.item_id,
+                "title": item.title,
+                "platform": item.platform.value,
+                "field": p.field,
+                "text": p.text,
+                "community": p.community,
+                "degree": p.degree,
             }
         )
 
     edges: list[dict] = []
-    for e in session.exec(select(TopicEdge)).all():
-        if e.src_cluster_id in surviving and e.dst_cluster_id in surviving:
+    for link in session.exec(select(GraphLink)).all():
+        if link.src_chunk_id in surviving and link.dst_chunk_id in surviving:
             edges.append(
-                {"source": e.src_cluster_id, "target": e.dst_cluster_id, "weight": e.weight}
+                {"source": link.src_chunk_id, "target": link.dst_chunk_id, "weight": link.weight}
             )
 
     cache = session.get(GraphCache, 1)
@@ -147,7 +113,7 @@ def aggregate_graph(
 
 def get_graph(session: Session, filters: GraphFilters | None = None) -> dict:
     """Unfiltered => the pre-serialized cache blob (zero compute). Filtered =>
-    a cheap membership re-aggregation."""
+    a cheap node/link re-aggregation."""
     if filters is None or filters.is_unfiltered():
         cache = session.get(GraphCache, 1)
         if cache is not None and cache.blob:
@@ -159,42 +125,15 @@ def get_graph(session: Session, filters: GraphFilters | None = None) -> dict:
     return aggregate_graph(session, allowed_item_ids=allowed)
 
 
-def cluster_items(
-    session: Session,
-    cluster_id: int,
-    *,
-    offset: int = 0,
-    limit: int = 50,
-    filters: GraphFilters | None = None,
-) -> list[dict]:
-    """Paginated full member list for a cluster (the panel's 'Show all')."""
-    stmt = select(ClusterMembership).where(ClusterMembership.cluster_id == cluster_id)
-    if filters is not None and not filters.is_unfiltered():
-        allowed = _allowed_item_ids(session, filters)
-        stmt = stmt.where(col(ClusterMembership.item_id).in_(allowed or {-1}))
-    stmt = stmt.order_by(col(ClusterMembership.weight).desc()).offset(offset).limit(limit)
-    mems = session.exec(stmt).all()
-    item_by_id = {
-        i.id: i
-        for i in session.exec(
-            select(Item).where(col(Item.id).in_([m.item_id for m in mems] or [-1]))
-        ).all()
-    }
-    return [
-        _item_brief(item_by_id[m.item_id], weight=m.weight, chunk_count=m.chunk_count)
-        for m in mems
-        if m.item_id in item_by_id
-    ]
-
-
-def primary_cluster(session: Session, item_id: int) -> int | None:
-    """The cluster an item belongs to most strongly (for graph focus jumps)."""
-    m = session.exec(
-        select(ClusterMembership)
-        .where(ClusterMembership.item_id == item_id)
-        .order_by(col(ClusterMembership.weight).desc())
+def focus_node(session: Session, item_id: int) -> int | None:
+    """A representative paragraph node for an item (most-connected one), so a
+    ``/graph?focus=<itemId>`` deep link can center on the article."""
+    rows = session.exec(
+        select(GraphParagraph)
+        .where(GraphParagraph.item_id == item_id)
+        .order_by(col(GraphParagraph.degree).desc())
     ).first()
-    return m.cluster_id if m is not None else None
+    return rows.chunk_id if rows is not None else None
 
 
 def related_items(session: Session, item_id: int, *, limit: int = 8) -> list[dict]:
@@ -210,9 +149,18 @@ def related_items(session: Session, item_id: int, *, limit: int = 8) -> list[dic
         item = session.get(Item, rec.related_item_id)
         if item is None or item.is_archived:
             continue
-        brief = _item_brief(item)
-        brief["score"] = rec.score
-        out.append(brief)
+        out.append(
+            {
+                "id": item.id,
+                "item_id": item.id,
+                "title": item.title,
+                "platform": item.platform.value,
+                "author": item.author,
+                "thumbnail": item.thumbnail,
+                "source_url": item.source_url,
+                "score": rec.score,
+            }
+        )
         if len(out) >= limit:
             break
     return out

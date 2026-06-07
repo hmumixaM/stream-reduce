@@ -7,6 +7,7 @@ import { Library } from "@/pages/Library";
 import { Search } from "@/pages/Search";
 import { FolderView } from "@/pages/FolderView";
 import { ItemDetail } from "@/pages/ItemDetail";
+import { Annotations } from "@/pages/Annotations";
 import { Queue } from "@/pages/Queue";
 import { Subscriptions } from "@/pages/Subscriptions";
 import { Stats } from "@/pages/Stats";
@@ -41,6 +42,7 @@ const children = [
   ...(MIRROR
     ? []
     : [
+        { path: "annotations", element: <Annotations /> },
         { path: "queue", element: <Queue /> },
         { path: "subscriptions", element: <Subscriptions /> },
         { path: "stats", element: <Stats /> },

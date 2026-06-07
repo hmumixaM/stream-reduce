@@ -6,7 +6,7 @@ import { api, type GraphFilters } from "@/lib/api";
 import { MIRROR } from "@/lib/mirror";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { GraphCanvas, type GraphCanvasHandle } from "@/components/GraphCanvas";
-import { ClusterPanel } from "@/components/ClusterPanel";
+import { NodePanel } from "@/components/NodePanel";
 import { timeAgo } from "@/lib/utils";
 
 const PLATFORMS = ["youtube", "bilibili", "apple_podcast", "xiaoyuzhou", "rss"];
@@ -85,32 +85,32 @@ export function Graph() {
     [data, selectedId],
   );
 
-  // Resolve a ?focus=<itemId> deep link into a centered cluster, once.
+  const selectNode = (id: number) => {
+    setSelectedId(id);
+    canvasRef.current?.focusNode(id);
+  };
+
+  // Resolve a ?focus=<itemId> deep link into a centered paragraph node, once.
   const focusedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!focus || !data || focusedRef.current === focus) return;
     focusedRef.current = focus;
-    api.getItemCluster(Number(focus)).then((clusterId) => {
-      if (clusterId != null) {
-        setSelectedId(clusterId);
-        setTimeout(() => canvasRef.current?.focusCluster(clusterId), 800);
+    api.getItemFocus(Number(focus)).then((nodeId) => {
+      if (nodeId != null) {
+        setSelectedId(nodeId);
+        setTimeout(() => canvasRef.current?.focusNode(nodeId), 800);
       }
     });
   }, [focus, data]);
 
-  const selectCluster = (id: number) => {
-    setSelectedId(id);
-    canvasRef.current?.focusCluster(id);
-  };
-
-  const runTopicSearch = (e: React.FormEvent) => {
+  const runSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const q = topicQuery.trim().toLowerCase();
     if (!q || !data) return;
     const match =
-      data.nodes.find((n) => n.label.toLowerCase().includes(q)) ??
-      data.nodes.find((n) => n.keywords.some((k) => k.toLowerCase().includes(q)));
-    if (match) selectCluster(match.id);
+      data.nodes.find((n) => (n.title ?? "").toLowerCase().includes(q)) ??
+      data.nodes.find((n) => (n.text ?? "").toLowerCase().includes(q));
+    if (match) selectNode(match.id);
   };
 
   return (
@@ -123,16 +123,16 @@ export function Graph() {
             </h1>
             <p className="text-sm text-muted-foreground">
               {data
-                ? `${data.nodes.length} topics`
-                : "Topic clusters across your library"}
+                ? `${data.nodes.length} paragraphs · ${data.edges.length} links`
+                : "Paragraphs linked by meaning"}
               {data?.built_at && ` · built ${timeAgo(data.built_at)}`}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <form onSubmit={runTopicSearch} className="relative">
+            <form onSubmit={runSearch} className="relative">
               <SearchIcon className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Jump to topic…"
+                placeholder="Find a paragraph…"
                 value={topicQuery}
                 onChange={(e) => setTopicQuery(e.target.value)}
                 className="w-44 pl-8"
@@ -195,12 +195,12 @@ export function Graph() {
               ref={canvasRef}
               data={data}
               selectedId={selectedId}
-              onSelect={selectCluster}
+              onSelect={selectNode}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-muted-foreground">
               <Network className="mb-3 h-8 w-8 opacity-40" />
-              No topics yet.
+              No paragraphs yet.
               {!MIRROR && " Process more content, then rebuild the graph."}
             </div>
           )}
@@ -209,12 +209,7 @@ export function Graph() {
         {/* Desktop side panel */}
         {data && (
           <Card className="hidden w-80 shrink-0 overflow-hidden md:block">
-            <ClusterPanel
-              node={selectedNode}
-              graph={data}
-              filters={filters}
-              onSelectCluster={selectCluster}
-            />
+            <NodePanel node={selectedNode} graph={data} onSelectNode={selectNode} />
           </Card>
         )}
 
@@ -228,12 +223,7 @@ export function Graph() {
               <X className="h-4 w-4" />
             </button>
             <div className="max-h-[70vh] overflow-hidden">
-              <ClusterPanel
-                node={selectedNode}
-                graph={data}
-                filters={filters}
-                onSelectCluster={selectCluster}
-              />
+              <NodePanel node={selectedNode} graph={data} onSelectNode={selectNode} />
             </div>
           </div>
         )}

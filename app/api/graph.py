@@ -1,4 +1,4 @@
-"""Knowledge-graph REST endpoints: topic clusters, members, related articles."""
+"""Knowledge-graph REST endpoints: paragraph graph, focus, related articles."""
 
 from __future__ import annotations
 
@@ -6,13 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session
 
 from app.db import get_session
-from app.graph import (
-    GraphFilters,
-    cluster_items,
-    get_graph,
-    primary_cluster,
-    related_items,
-)
+from app.graph import GraphFilters, focus_node, get_graph, related_items
 from app.queue import enqueue_graph_build
 
 router = APIRouter(tags=["graph"])
@@ -41,29 +35,9 @@ def read_graph(
     return get_graph(session, filters)
 
 
-@router.get("/api/graph/clusters/{cluster_id}/items")
-def read_cluster_items(
-    cluster_id: int,
-    offset: int = 0,
-    limit: int = Query(default=50, le=200),
-    archived: bool = False,
-    favorite: bool = False,
-    folders: str | None = None,
-    platform: str | None = None,
-    session: Session = Depends(get_session),
-) -> list[dict]:
-    filters = GraphFilters(
-        include_archived=archived,
-        favorite=favorite,
-        folders=_parse_folders(folders),
-        platform=platform or None,
-    )
-    return cluster_items(session, cluster_id, offset=offset, limit=limit, filters=filters)
-
-
-@router.get("/api/graph/items/{item_id}/cluster")
-def read_item_cluster(item_id: int, session: Session = Depends(get_session)) -> dict:
-    return {"cluster_id": primary_cluster(session, item_id)}
+@router.get("/api/graph/items/{item_id}/focus")
+def read_focus_node(item_id: int, session: Session = Depends(get_session)) -> dict:
+    return {"node_id": focus_node(session, item_id)}
 
 
 @router.post("/api/graph/rebuild")

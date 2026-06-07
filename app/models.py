@@ -227,6 +227,34 @@ class Comment(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class HighlightSource(str, Enum):
+    summary = "summary"
+    transcript = "transcript"
+
+
+class Highlight(SQLModel, table=True):
+    """A user-selected span of an item's summary/transcript, optionally annotated.
+
+    Anchoring is text-based: ``quote`` is the exact selected string and the
+    frontend re-wraps the first matching occurrence in the rendered markdown.
+    ``prefix``/``suffix`` are short surrounding snippets that disambiguate the
+    match when the same quote appears more than once. Highlights are user data
+    (never regenerated) and live independently of the derived chunk/graph tables.
+    """
+
+    id: int | None = Field(default=None, primary_key=True)
+    item_id: int = Field(foreign_key="item.id", index=True)
+    source: HighlightSource = Field(
+        sa_column=Column(SAEnum(HighlightSource), nullable=False, default=HighlightSource.summary)
+    )
+    quote: str = Field(sa_column=Column(Text))
+    note: str = Field(default="", sa_column=Column(Text))
+    color: str = Field(default="yellow")
+    prefix: str = Field(default="", sa_column=Column(Text))
+    suffix: str = Field(default="", sa_column=Column(Text))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class AppSetting(SQLModel, table=True):
     """Runtime-editable overrides (key/value) layered on top of env defaults."""
 
@@ -250,44 +278,36 @@ class ApiCall(SQLModel, table=True):
 
 
 # --- Knowledge graph (derived, periodically rebuilt) ------------------------
-# Topic clusters come from Louvain community detection over a cosine kNN graph of
-# the existing chunk embeddings. Every table below is derived data: a rebuild
+# Each node is a *summary paragraph* (a key point / overview / walkthrough span,
+# etc.); edges link paragraphs by cosine similarity of their embeddings. Louvain
+# communities only color the nodes. Every table below is derived data: a rebuild
 # wipes and rewrites it, and it is never the source of truth.
 
 
-class TopicCluster(SQLModel, table=True):
+class GraphParagraph(SQLModel, table=True):
+    """A single summary-paragraph node in the knowledge graph."""
+
     id: int | None = Field(default=None, primary_key=True)
     build_id: int = Field(default=0, index=True)
-    label: str = ""
-    # Top representative terms/entities for the cluster.
-    keywords: list = Field(default_factory=list, sa_column=Column(JSON))
-    # Number of member chunks (graph nodes) in the community.
-    size: int = 0
-    # Number of distinct items (articles) touching the cluster.
-    item_count: int = 0
-    created_at: datetime = Field(default_factory=utcnow)
-
-
-class ClusterMembership(SQLModel, table=True):
-    """Item <-> cluster link. An item can belong to several clusters (its chunks
-    spread across topics); ``weight`` (share of the item's chunks landing in the
-    cluster) makes filtered re-aggregation cheap without touching vectors."""
-
-    id: int | None = Field(default=None, primary_key=True)
-    cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
+    # The source chunk this node renders (stable node id within a build).
+    chunk_id: int = Field(index=True)
     item_id: int = Field(foreign_key="item.id", index=True)
-    chunk_count: int = 0
-    weight: float = 0.0
+    # Summary field this paragraph came from (tldr / key_point / walkthrough …).
+    field: str = ""
+    # The paragraph text (capped) shown on hover / in the side panel.
+    text: str = Field(default="", sa_column=Column(Text))
+    # Louvain community index (for node color) and edge degree (for node size).
+    community: int = 0
+    degree: int = 0
 
 
-class TopicEdge(SQLModel, table=True):
-    """Undirected adjacency between two topic clusters (centroid cosine).
-
-    Stored once per pair with ``src_cluster_id < dst_cluster_id``."""
+class GraphLink(SQLModel, table=True):
+    """Undirected similarity edge between two paragraph nodes (keyed by chunk_id;
+    stored once per pair with ``src_chunk_id < dst_chunk_id``)."""
 
     id: int | None = Field(default=None, primary_key=True)
-    src_cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
-    dst_cluster_id: int = Field(foreign_key="topiccluster.id", index=True)
+    src_chunk_id: int = Field(index=True)
+    dst_chunk_id: int = Field(index=True)
     weight: float = 0.0
 
 
@@ -312,6 +332,6 @@ class GraphCache(SQLModel, table=True):
     blob: str = Field(default="", sa_column=Column(Text))
     # Content fingerprint of the chunk table at build time (skip if unchanged).
     fingerprint: str = ""
-    cluster_count: int = 0
+    node_count: int = 0
     item_count: int = 0
     built_at: datetime = Field(default_factory=utcnow)
