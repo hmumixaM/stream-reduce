@@ -110,7 +110,13 @@ def ensure_project(project: str) -> None:
         capture_output=True,
         text=True,
     )
-    if project in listing.stdout:
+    if listing.returncode == 0 and project in listing.stdout:
+        return
+    if listing.returncode != 0:
+        # Couldn't list (e.g. a token/permission quirk); assume the project
+        # exists and let the deploy surface any real error rather than wrongly
+        # trying to (re)create it.
+        print("warning: could not list Pages projects; assuming it exists.")
         return
     print(f"Creating Cloudflare Pages project '{project}'...")
     subprocess.run(
